@@ -1,0 +1,93 @@
+flow_dir: flow direction (file: tifs/lgb/lower_ganga_fd.tif)
+flow_acc: flow accumulation (file: tifs/lgb/flow_acc1.tif)
+dem: DEM Elevation files (file: tifs/lgb/dem.tif)
+soil: soil (file: tifs/lgb/INPUTS/soil_clipped.tif)
+lulc: lulc (file: tifs/lgb/INPUTS/lulc_clipped.tif)
+GEE: Google Earth Engine (files are up in gdrive)
+rainfall: Daily rainfall data (summed up 1Hr data for an entire day) 
+streams: Stream Order by strahler method (file: tifs/lgb/stream_order_strahler2.tif)
+rfsim: Runoff simulation rasters 
+mws: Microwatershed as raster (file: tifs/lgb/mwshed.tif)
+
+
+GEE -> soil
+GEE -> lulc
+GEE -> rainfall
+
+stream_orderpy: compute_legacy_stream_order.py
+stream_orderpy.shape: oval
+flow_acc -> stream_orderpy
+flow_dir ->  stream_orderpy
+dem ->  stream_orderpy
+stream_orderpy -> streams
+
+runoff_simpy: {
+	shape: oval
+	label: compute_runoff_matrices.py
+}
+
+compute_sr : {
+	shape: oval
+	label: compute_sr.py
+}
+
+soil -> compute_sr
+lulc -> compute_sr
+dem ->  compute_sr
+sr_files: SR files (files: tifs/lgb/sr1, sr2, sr3.tif)
+compute_sr -> sr_files
+
+rainfall -> runoff_simpy
+sr_files -> runoff_simpy
+runoff_simpy -> rfsim
+
+runoff_perws: {
+    shape: oval
+    label: make_rainfall_vs_runoff_plots.py
+}
+runoff_perws_graphs: Per watershed timeseries
+ws_runoff: Runoff of each watershed over entire month
+
+mws -> runoff_perws
+rainfall -> runoff_perws
+rfsim -> runoff_perws
+runoff_perws -> runoff_perws_graphs
+runoff_perws -> ws_runoff
+
+mw_step2: {
+    label: compute_legacy_microwatershed_step2.py
+    shape: oval
+}
+flow_acc -> mw_step2
+flow_dir -> mw_step2
+mw_step2 -> mws
+
+jumppy: {
+    label: compute_jump_with_velocity_cupy.py
+    shape: oval
+}
+flow_dir -> jumppy
+dem -> jumppy
+
+index_png: Jump Matrix (file: tifs/lgb/index_lgb.png)
+porepoints_png: porepoints
+jumppy -> velocity files 
+jumppy -> porepoints_png
+jumppy -> index_png
+index_png -> runoff_simpy
+porepoints_png-> runoff_simpy
+
+flow_accpy: {
+    label: compute_legacy_flow_accumulation.py
+    shape: oval
+}
+flow_dir -> flow_accpy
+dem -> flow_accpy
+flow_accpy -> flow_acc
+
+flow_dirpy: {
+    label: compute_legacy_flow_direction.py
+    shape: oval
+}
+dem -> flow_dirpy
+flow_dirpy -> flow_dir #: NOT CURRENTLY DONE
