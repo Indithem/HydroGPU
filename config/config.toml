@@ -1,0 +1,35 @@
+# configuration values for the project
+
+GEE_PROJECT_NAME = 'fast-ability-467118-m8'	# Google Earth Engine project name
+
+# note: GEE doesn't recognize '/' as seperator between folders, 
+# this folder will always reside at root of your gdrive
+# Donot add any '/' in this path.
+GOOGLEDRIVE_RAINFALL_FOLDER = '0btp-rainfall'
+GEE_SCALE = 30
+
+# Path to the GeoJSON file defining the region of interest
+# This is a json file whose polygon is present as ["geometry"]["coordinates"] key.
+# How I obtained this geojson can be studied from that dir's justfile
+BOUNDARY_GEOJSON_PATH = './tifs/boundary_polygons/masalia_boundary.geojson'  
+
+# The following tifs will be downloaded by scripts.
+DEMFILE_PATH = './tifs/dem.tif'
+SOIL_PATH = './tifs/soil.tif'
+LULC_PATH = './tifs/lulc.tif'
+# The following tifs will be produced by scripts.
+FLOWDIRECTION_PATH = './tifs/fd.tif'
+FLOWACCUMULATION_PATH = './tifs/facc.tif'
+
+# Obtain mws from core-stack, (and clip it)
+# it can also be produced. But algo is not tested.
+# algo produces a raster(.tif), need to convert it into a geojson
+MICROWATERSHEDS_PATH = './tifs/mws.geojson'
+
+# Folder where rainfall data from GEE is downloaded to
+RAINFALL_FOLDER = './tifs/rainfall/'
+RUNOFFS_FOLDER = './tifs/runoffs/'
+
+TIMESERIES_VECTOR = './tifs/timeseries.geojson'
+
+

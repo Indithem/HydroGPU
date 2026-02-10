@@ -1,0 +1,5 @@
+get-polygon:
+	jq '.features | map(select(.properties.sbcode == "BHG" and .properties.wscode == "31")) | .[0]' ./Watershed_pan_india.geojson > masalia_boundary.geojson
+
+get-file:
+	echo Download from https://drive.google.com/file/d/1eKZLpBWQDbT4A3OmLeGBtz0VIUMXJLsQ/view

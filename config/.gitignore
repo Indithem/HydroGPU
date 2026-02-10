@@ -1,0 +1,8 @@
+# This folder is referenced by:
+# src/download_dem.py
+# src/download_rainfall.py
+# src/pydrive_settings.yaml
+# README.md
+
+pydrive_credentials.json
+client_secrets.json
