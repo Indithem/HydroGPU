@@ -198,20 +198,21 @@ class GeoTIFFHandler:
             return padded
 
 
-    def rasterize_by_id(self, geojson_path, fill_value=0):
+    def rasterize_by_id(self, shapes, fill_value=0):
         """
         Rasterizes GeoJSON features using their 'id' property as the pixel value.
         Not generic enough, i think.
         """
-        with open(geojson_path, 'r') as f:
-            geojson_data = json.load(f)
+        # with open(geojson_path, 'r') as f:
+        #     geojson_data = json.load(f)
 
         # 1. Extract (geometry, value) pairs
         # This creates a list like: [(geom1, 817103), (geom2, 818258), ...]
-        shapes = [
-            (shape(feature['geometry']), feature['properties']['id'])
-            for feature in geojson_data['features']
-        ]
+
+        # shapes = [
+        #     (shape(feature['geometry']), feature['properties']['id'])
+        #     for feature in geojson_data['features']
+        # ]
 
         # 2. Rasterize
         # Note: Use a dtype large enough for your IDs (e.g., int32 or float32)

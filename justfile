@@ -6,3 +6,6 @@ download:
 
 run:
 	uv run src/run.py
+
+runoff:
+    uv run src/runoff_only_with_rainfall.py

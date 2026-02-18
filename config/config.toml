@@ -6,12 +6,17 @@ GEE_PROJECT_NAME = 'fast-ability-467118-m8'	# Google Earth Engine project name
 # this folder will always reside at root of your gdrive
 # Donot add any '/' in this path.
 GOOGLEDRIVE_RAINFALL_FOLDER = '0btp-rainfall'
-GEE_SCALE = 30
+GEE_SCALE = 30 # in meters
 
 # Path to the GeoJSON file defining the region of interest
+# Could be the mws geojson itself
+# ( older comments:
 # This is a json file whose polygon is present as ["geometry"]["coordinates"] key.
 # How I obtained this geojson can be studied from that dir's justfile
-BOUNDARY_GEOJSON_PATH = './tifs/boundary_polygons/masalia_boundary.geojson'  
+# )
+# BOUNDARY_GEOJSON_PATH = './tifs/boundary_polygons/masalia_boundary.geojson'
+BOUNDARY_GEOJSON_PATH = './tifs/mws.geojson'
+
 
 # The following tifs will be downloaded by scripts.
 DEMFILE_PATH = './tifs/dem.tif'
@@ -31,5 +36,7 @@ RAINFALL_FOLDER = './tifs/rainfall/'
 RUNOFFS_FOLDER = './tifs/runoffs/'
 
 TIMESERIES_VECTOR = './tifs/timeseries.geojson'
+
+PAN_INDIA_MWS = './tifs/raw/Microwatershed_v2_with_details.geojson'
 
 

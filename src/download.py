@@ -6,10 +6,10 @@ from utils import make_logger
 if __name__=="__main__":
     downloaders = [
         # soil,
-        lulc,
+        # lulc,
         # rainfall
     ]
-    downloaders = [d.Downloader for d in downloaders]
+    downloaders = [d.Downloader for d in downloaders] + [rainfall.Xarr]
 
     parser = ArgumentParser()
     for downloader in downloaders:

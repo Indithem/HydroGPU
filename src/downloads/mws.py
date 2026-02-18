@@ -1,28 +1,23 @@
 from downloads import GenericDownloader, ee
 import json
+import geopandas as gpd
 
-class Downloader(GenericDownloader):
+class Clip(GenericDownloader):
     def main(self):
-        dataset = ee.Image('projects/corestack-datasets/assets/datasets/India_mws_uid_area_gt_500')
-        elevation = dataset.select('elevation')
+        # 1. Load the small boundary first
+        mask = gpd.read_file(self.cfg.BOUNDARY_GEOJSON_PATH)
 
-        with open(self.cfg.BOUNDARY_GEOJSON_PATH) as f:
-            geojson = json.load(f)
-            # region = ee.Feature(geojson['geometry'])
-            region = ee.Geometry.Polygon(geojson['geometry']['coordinates'])
+        # 2. Get the bounding box of the mask
+        bbox = tuple(mask.total_bounds.tolist())  # returns [minx, miny, maxx, maxy]
 
-        elevation_clip = elevation.clipToBoundsAndScale(
-            geometry=region,
-            scale=self.cfg.GEE_SCALE
-        )
+        # 3. Read ONLY the features within that box from the 5GB file
+        # This uses the spatial index of the file (if available) or streams efficiently
+        gdf = gpd.read_file(self.cfg.PAN_INDIA_MWS, bbox=bbox)
 
-        url = elevation_clip.getDownloadURL({
-            'format': 'GEO_TIFF'
-        })
+        # 2. Ensure they use the same CRS (Coordinate Reference System)
+        if gdf.crs != mask.crs:
+            mask = mask.to_crs(gdf.crs)
 
-        self.logger.info('Download URL:' + url)
-
-        response = requests.get(url)
-
-        with open(self.cfg.DEMFILE_PATH, 'wb') as f:
-            f.write(response.content)
+        # 3. Clip the data
+        clipped_gdf = gpd.clip(gdf, mask)
+        return clipped_gdf

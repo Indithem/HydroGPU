@@ -7,10 +7,12 @@ from downloads.rainfall import Downloader as RainfallDownloader
 
 class DynamicWorld(GenericDownloader):
     def main(self):
-        with open(self.cfg.BOUNDARY_GEOJSON_PATH) as f:
-            geojson = json.load(f)
-            # region = ee.Feature(geojson['geometry'])
-            region = ee.Geometry.Polygon(geojson['geometry']['coordinates'])
+        # with open(self.cfg.BOUNDARY_GEOJSON_PATH) as f:
+        #     geojson = json.load(f)
+        #     # region = ee.Feature(geojson['geometry'])
+        #     region = ee.Geometry.Polygon(geojson['geometry']['coordinates'])
+
+        region = self.load_region()
 
         start = self.args.end.advance(-30, 'day')
         end = self.args.end
@@ -52,10 +54,12 @@ class Corestack(GenericDownloader):
         dataset = ee.Image('projects/corestack-datasets/assets/datasets/LULC_v3_river_basin/pan_india_lulc_v3_2024_2025')
         band = dataset.select(0)
 
-        with open(self.cfg.BOUNDARY_GEOJSON_PATH) as f:
-            geojson = json.load(f)
-            # region = ee.Feature(geojson['geometry'])
-            region = ee.Geometry.Polygon(geojson['geometry']['coordinates'])
+        # with open(self.cfg.BOUNDARY_GEOJSON_PATH) as f:
+        #     geojson = json.load(f)
+        #     # region = ee.Feature(geojson['geometry'])
+        #     region = ee.Geometry.Polygon(geojson['geometry']['coordinates'])
+
+        region = self.load_region()
 
         elevation_clip = band.clipToBoundsAndScale(
             geometry=region,

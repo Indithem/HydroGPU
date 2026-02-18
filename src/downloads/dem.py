@@ -7,10 +7,12 @@ class Downloader(GenericDownloader):
         dataset = ee.Image('CGIAR/SRTM90_V4')
         elevation = dataset.select('elevation')
 
-        with open(self.cfg.BOUNDARY_GEOJSON_PATH) as f:
-            geojson = json.load(f)
-            # region = ee.Feature(geojson['geometry'])
-            region = ee.Geometry.Polygon(geojson['geometry']['coordinates'])
+        # with open(self.cfg.BOUNDARY_GEOJSON_PATH) as f:
+        #     geojson = json.load(f)
+        #     # region = ee.Feature(geojson['geometry'])
+        #     region = ee.Geometry.Polygon(geojson['geometry']['coordinates'])
+
+        region = self.load_region()
 
         elevation_clip = elevation.clipToBoundsAndScale(
             geometry=region,

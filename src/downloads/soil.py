@@ -24,10 +24,12 @@ from downloads.rainfall import Downloader as RainfallDownloader
 
 class Downloader(GenericDownloader):
     def main(self):
-        with open(self.cfg.BOUNDARY_GEOJSON_PATH) as f:
-            geojson = json.load(f)
-            # region = ee.Feature(geojson['geometry'])
-            region = ee.Geometry.Polygon(geojson['geometry']['coordinates'])
+        # with open(self.cfg.BOUNDARY_GEOJSON_PATH) as f:
+        #     geojson = json.load(f)
+        #     # region = ee.Feature(geojson['geometry'])
+        #     region = ee.Geometry.Polygon(geojson['geometry']['coordinates'])
+
+        region = self.load_region()
 
         # Load hydrologic soil group dataset
         hsg_image = ee.Image('projects/sat-io/open-datasets/HiHydroSoilv2_0/Hydrologic_Soil_Group_250m')
