@@ -157,6 +157,33 @@ class GeoTIFFHandler:
 
         self.logger.info("Done writing to " + output_path)
 
+    def load_with_padding_inner(self, crs, data: np.ndarray, src_bounds, fill_value=0):
+        if crs != self.crs:
+            raise ValueError("CRS mismatch")
+
+        # Use your existing window logic with the bounds from the dict
+        ref_window = self.window(*src_bounds)
+        row_off, col_off = int(ref_window.row_off), int(ref_window.col_off)
+
+        padded = np.full((self.height, self.width), fill_value, dtype=data.dtype)
+
+        height, width = data.shape
+
+        dest_row0 = max(0, row_off)
+        dest_col0 = max(0, col_off)
+        dest_row1 = min(self.height, dest_row0 + height)
+        dest_col1 = min(self.width, dest_col0 + width)
+
+        # Paste source data if overlapping
+        src_row0 = max(0, -row_off)
+        src_col0 = max(0, -col_off)
+        src_row1 = src_row0 + (dest_row1 - dest_row0)
+        src_col1 = src_col0 + (dest_col1 - dest_col0)
+
+        padded[dest_row0:dest_row1, dest_col0:dest_col1] = data[src_row0:src_row1, src_col0:src_col1]
+
+        return padded
+
     def load_with_padding(self, src_path, fill_value=0):
         with rasterio.open(src_path) as src:
             if src.crs != self.crs:

@@ -9,7 +9,7 @@ if __name__=="__main__":
         # lulc,
         # rainfall
     ]
-    downloaders = [d.Downloader for d in downloaders] + [rainfall.Xarr]
+    downloaders = [d.Downloader for d in downloaders] + [rainfall.Geedim]
 
     parser = ArgumentParser()
     for downloader in downloaders:

@@ -1,8 +1,10 @@
+import gc
 import json
 import os
 import shutil
 import time
 from argparse import ArgumentParser
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 import xarray as xr
 import requests
@@ -11,6 +13,10 @@ from rasterio.enums import Resampling
 from shapely.geometry import shape
 from rasterio.transform import from_origin
 from tqdm import tqdm
+# import geedim as gd
+import cupy as cp
+import numpy as np
+import cucim.skimage.transform as cimg
 
 from downloads import GenericDownloader, ee, Logger
 
@@ -179,9 +185,11 @@ class Xarr(Downloader):
         ds = xr.open_dataset(
             rainfall_collection,
             engine='ee',
+            # chunks={'time': 48},
             projection=native_proj,  # <--- CRITICAL: Matches original GEE alignment
             geometry=buffered_region,  # <--- Ensures the extent covers your region
             # scale=0.1             # Remove this; projection already contains the 0.1 scale
+            fast_time_slicing = True,
         )
 
         # Expected for a 1-degree box at 0.1 scale: {'time': X, 'lat': 10, 'lon': 10}
@@ -196,9 +204,10 @@ class Xarr(Downloader):
         deg_per_meter = 1 / 111319.49
         target_res_degrees = target_scale_meters * deg_per_meter
 
-        self.empty_folder(self.cfg.RAINFALL_FOLDER)
+        # self.empty_folder(self.cfg.RAINFALL_FOLDER)
 
-        def process_hour(i, da, clipping_geom, target_res, rainfall_folder):
+        self.logger.info("ready to download rainfall")
+        def process_hour(i, da, clipping_geom, target_res):
             """
             Worker function to process a single time slice.
             """
@@ -213,7 +222,7 @@ class Xarr(Downloader):
             hourly_slice_30m = hourly_slice.rio.reproject(
                 dst_crs="EPSG:4326",
                 resolution=target_res,
-                resampling=Resampling.nearest
+                resampling=Resampling.bilinear
             )
 
             # 3. Clip to the specific watershed geometry
@@ -225,28 +234,82 @@ class Xarr(Downloader):
             )
 
             # 4. Generate filename and save
-            timestamp = final_raster.time.dt.strftime('%Y%m%d_%H').item()
-            filename = f"{rainfall_folder}/rainfall_{timestamp}.tif"
+            # timestamp = final_raster.time.dt.strftime('%Y%m%d_%H').item()
+            # filename = f"{self.cfg.RAINFALL_FOLDER}/rainfall_{timestamp}.tif"
+            #
+            # # This line triggers the actual computation/download
+            # final_raster.rio.to_raster(filename, dtype="float32")
 
-            # This line triggers the actual computation/download
-            final_raster.rio.to_raster(filename, dtype="float32")
+
+            return {
+                "timestamp": final_raster.time.dt.strftime('%Y%m%d_%H').item(),
+                "data": final_raster.values.squeeze(),
+                "bounds": final_raster.rio.bounds(),
+                "transform": final_raster.rio.transform(),
+                "crs": final_raster.rio.crs
+            }
+
+        WOKRERS = 8
+        ASK_BUFF = 96
+        N = len(da.time)
+        # times = da.time.values
+        with concurrent.futures.ThreadPoolExecutor(max_workers=WOKRERS) as executor:
+            futures = deque()
+
+            for t in tqdm(range(N), desc="Exporting Rainfall"):
+                if len(futures)==0:
+                    gc.collect()
+                    it = range(t, min(t+ASK_BUFF, N))
+                    da_slice = da.isel(time=it)
+                    for i in it:
+                        futures.append(
+                            executor.submit(
+                                process_hour,
+                                i-t,
+                                da_slice,
+                                clipping_geom,
+                                target_res_degrees,
+                            )
+                        )
+
+                future = futures.popleft()  # O(1)
+                result = future.result()
+                yield result
 
 
-        # max workers = 4, to prevent DDoS GEE
-        # with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            # Submit all tasks
-            futures = [
-                executor.submit(
-                    process_hour,
-                    i,
-                    da,
-                    clipping_geom,
-                    target_res_degrees,
-                    self.cfg.RAINFALL_FOLDER
-                ) for i in range(len(da.time))
-            ]
-
-            # Process results as they complete with a progress bar
-            for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Exporting Rainfall"):
-                future.result()
+# class Geedim(Downloader):
+#     def main(self):
+#         self.logger.info("Starting rainfall download")
+#
+#         # 1. Convert dict/GeoJSON to EE Geometry
+#         region = self.load_region()
+#
+#         # 2. Add the buffer (12km is safe for 11km pixels)
+#         # This ensures you don't get "cut off" edges
+#         buffered_region = region.buffer(12000).bounds()
+#
+#         clipping_geom = shape(region.getInfo())
+#
+#         rainfall_collection = (
+#             ee.ImageCollection('JAXA/GPM_L3/GSMaP/v6/operational')
+#             # .filterBounds(region)
+#             .filterDate(self.args.start, self.args.end)
+#             .select('hourlyPrecipRate')
+#         )
+#
+#         first_img = rainfall_collection.first()
+#         native_proj = first_img.projection()
+#
+#         gd.Initialize(
+#             project=self.cfg.GEE_PROJECT_NAME,
+#             opt_url='https://earthengine-highvolume.googleapis.com'
+#         )
+#
+#         prep_coll = rainfall_collection.gd.prepareForExport(
+#             region=buffered_region,
+#             scale=0.1,
+#             crs=native_proj.crs().getInfo(),
+#             dtype='float32'  # Match GSMaP data type
+#         )
+#
+#         prep_coll.gd.toGeoTIFF('download_folder', split='images')

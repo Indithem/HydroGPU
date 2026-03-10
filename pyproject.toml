@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "cucim-cu13>=26.2.0",
     "cupy-cuda13x>=13.6.0",
     "earthengine-api>=1.7.4",
     "geopandas>=1.1.2",

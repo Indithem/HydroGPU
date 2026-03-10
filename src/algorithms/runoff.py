@@ -3,17 +3,17 @@ import warnings
 import os
 from natsort import natsorted
 from tqdm import tqdm
-
 from . import GenericAlgorithm, GeoTIFFHandler
 import cupy as cp
 import numpy as np
+from downloads import rainfall
 
 class Runoff(GenericAlgorithm):
-    def main(self):
-        pathlib.Path(self.cfg.RUNOFFS_FOLDER).mkdir(parents=True, exist_ok=True)
+    def load_inputs(self):
+        self.rainfall_iter = rainfall.Xarr(self.args, self.logger, self.cfg)
 
-        files = natsorted(os.listdir(self.cfg.RAINFALL_FOLDER))
-        rainfall_files = [file for file in files if file.endswith('.tif')]
+    def main(self):
+        # pathlib.Path(self.cfg.RUNOFFS_FOLDER).mkdir(parents=True, exist_ok=True)
 
         images = []
         P_sum = None
@@ -28,10 +28,9 @@ class Runoff(GenericAlgorithm):
 
         self.logger.info("Loaded sr's")
 
-        for index, file in enumerate(tqdm(rainfall_files)):
-            self.logger.info(f"Processing file {index}: {file}")
-            img_path = os.path.join(self.cfg.RAINFALL_FOLDER, file)
-            img = self.tif_handler.load_with_padding(img_path)
+        for index, file in enumerate(self.rainfall_iter.main()):
+            # self.logger.info(f"Processing file {index}")
+            img = self.tif_handler.load_with_padding_inner(file['crs'], file['data'], file['bounds'])
 
             # test_raster(img, index, file)
             np.nan_to_num(img, copy=False)
@@ -42,7 +41,7 @@ class Runoff(GenericAlgorithm):
             if index == 4:
                 P_sum = cp.sum(cp.stack([cp.asarray(i) for i in images[2:5]]), axis=0)
                 P5_sum = cp.sum(cp.stack([cp.asarray(i) for i in images[:5]]), axis=0)
-                self.logger.info(f"4. Initial sum creation")
+                # self.logger.info(f"4. Initial sum creation")
             elif index >= 5:
                 new_img = cp.asarray(images[-1])
                 # assert check_physical_range(new_img, "new_img", min_val=0.0)
@@ -52,17 +51,17 @@ class Runoff(GenericAlgorithm):
                 old_img = cp.asarray(images[-3])
                 # assert check_physical_range(old_img, "old_img (for P_sum)", min_val=0.0)
                 P_sum = P_sum - old_img + new_img
-                self.logger.info(f"4. Updated sums")
+                # self.logger.info(f"4. Updated sums")
                 del old_img, new_img
                 old_img = images.pop(0)
                 del old_img
-                self.logger.info(f"5. Pop and delete oldest image")
+                # self.logger.info(f"5. Pop and delete oldest image")
 
             if index >= 4:
                 if previous_Runoff is not None:
                     P_sum += previous_Runoff
                     P5_sum += previous_Runoff
-                    self.logger.info("6. Add previous runoff")
+                    # self.logger.info("6. Add previous runoff")
 
                 # check_numerical_stability(P_sum, "P_sum")
                 # check_numerical_stability(P5_sum, "P5_sum")
@@ -72,13 +71,13 @@ class Runoff(GenericAlgorithm):
                 m1_cp = LegacyCodes.compute_M(sr1, P5_sum)
                 m2_cp = LegacyCodes.compute_M(sr2, P5_sum)
                 m3_cp = LegacyCodes.compute_M(sr3, P5_sum)
-                self.logger.info("7. Compute M1,M2,M3")
+                # self.logger.info("7. Compute M1,M2,M3")
 
                 # cp.cuda.set_allocator(cp.cuda.MemoryPool().malloc)
                 # with cp.cuda.memory_hooks.DebugPrintHook():
                 R = LegacyCodes.calculate_runoff_cupy(P_sum, P5_sum, m1_cp, m2_cp, m3_cp, sr1, sr2, sr3)
                 del m1_cp, m2_cp, m3_cp
-                self.logger.info("8. Calculate runoff")
+                # self.logger.info("8. Calculate runoff")
 
                 # previous_Runoff = LegacyCodes.transfer_flow(destination_index, R)
 
@@ -96,13 +95,13 @@ class Runoff(GenericAlgorithm):
 
                 # self.logger.info("9. Transfer flow")
 
-                self.tif_handler.save_tiff(cp.asnumpy(R), os.path.join(self.cfg.RUNOFFS_FOLDER, f'runoff_simulation_{index}.tif'))
-                self.logger.info("10. write runoff simulation result")
+                # self.tif_handler.save_tiff(cp.asnumpy(R), os.path.join(self.cfg.RUNOFFS_FOLDER, f'runoff_simulation_{index}.tif'))
+                # self.logger.info("10. write runoff simulation result")
                 # runoff_rasters.append(R.get())
-                yield (img, R, file)
+                yield (img, R, file['timestamp'])
 
             else:
-                yield (img, None, file)
+                yield (img, None, file['timestamp'])
 
         self.logger.info("Done runoff sim")
         # return runoff_rasters

@@ -13,6 +13,7 @@ logger = make_logger("runoff_only_with_rainfall.log")
 def modify_cfg(args):
     config = cfg
     config.BOUNDARY_GEOJSON_PATH = args.boundary
+    config.MICROWATERSHEDS_PATH = args.boundary
     if args.t:
         path_obj = Path(config.BOUNDARY_GEOJSON_PATH)
         new_path = path_obj.with_name(f"{path_obj.stem}_timeseries{path_obj.suffix}")
@@ -38,10 +39,11 @@ def prereq():
         downloader(args, logger, config).main()
 
 if __name__=="__main__":
+    logger.info("Starting up")
+
     parser.add_argument('-p', "--pre-req", action='store_true', help="also do pre-req stuff")
     parser.add_argument('-b', '--boundary', help="overwrite BOUNDARY_GEOJSON_PATH", default=cfg.BOUNDARY_GEOJSON_PATH)
     parser.add_argument('-t', help="Dump timeseries next to boundary file", action='store_true')
-    parser.add_argument('--skip-rainfall', help="assume rainfall data is downloaded", action='store_true')
     rainfall.Downloader.parse_args(parser)
 
     if parser.parse_args().pre_req:
@@ -50,9 +52,8 @@ if __name__=="__main__":
     args = parser.parse_args()
     config = modify_cfg(args)
 
-    if not args.skip_rainfall:
-        rainfall.Xarr(args, logger, config).main()
 
     tif_handler = GeoTIFFHandler(cfg.DEMFILE_PATH, logger)
 
     timeseries.TimeSeries(args, tif_handler, config=config).run()
+    logger.info("Done")

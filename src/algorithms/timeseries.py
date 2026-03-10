@@ -3,7 +3,8 @@ from datetime import datetime
 from pprint import pprint
 from shapely.geometry import shape
 from tqdm import tqdm
-
+import cProfile
+import pstats
 from downloads import mws
 from algorithms.runoff import Runoff
 from . import GenericAlgorithm, GeoTIFFHandler
@@ -46,15 +47,24 @@ class TimeSeries(GenericAlgorithm):
         def add_to_series(running_data, raster, name):
             avg, ids = per_watershed_avg(mws_cp, raster)
             # name is of form "rainfall_20230701_00.tif"
-            raw_date = name[9:-4]
+            # raw_date = name[9:-4]
+            raw_date = name
             dt = datetime.strptime(raw_date, "%Y%m%d_%H")
             for val, mws_id in zip(avg, ids):
                 running_data[int(mws_id)].append((val, dt.isoformat()))
 
+        profiler = cProfile.Profile()
+        profiler.enable()
         for s1, s2, name in self.algo.main():
             add_to_series(mws_series_data1, s1, name)
             if s2 is not None:
                 add_to_series(mws_series_data2, s2, name)
+        profiler.disable()
+
+        stats = pstats.Stats(profiler)
+        stats.dump_stats("loop_profile.prof")
+
+        self.logger.info("Profiling data saved to loop_profile.prof")
 
         self.mws_series_data1 = mws_series_data1
         self.mws_series_data2 = mws_series_data2
@@ -79,6 +89,8 @@ class TimeSeries(GenericAlgorithm):
 
         with open(self.cfg.TIMESERIES_VECTOR, 'w+') as f:
             json.dump(mws_data, f)
+
+        self.logger.info(f"Saved file to {self.cfg.TIMESERIES_VECTOR}")
 
 
 

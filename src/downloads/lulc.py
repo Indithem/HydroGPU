@@ -14,7 +14,7 @@ class DynamicWorld(GenericDownloader):
 
         region = self.load_region()
 
-        start = self.args.end.advance(-30, 'day')
+        start = self.args.end.advance(-2, 'month')
         end = self.args.end
 
         # --- Dynamic World ---
