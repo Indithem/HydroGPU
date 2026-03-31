@@ -53,18 +53,18 @@ class TimeSeries(GenericAlgorithm):
             for val, mws_id in zip(avg, ids):
                 running_data[int(mws_id)].append((val, dt.isoformat()))
 
-        profiler = cProfile.Profile()
-        profiler.enable()
+        # profiler = cProfile.Profile()
+        # profiler.enable()
         for s1, s2, name in self.algo.main():
             add_to_series(mws_series_data1, s1, name)
             if s2 is not None:
                 add_to_series(mws_series_data2, s2, name)
-        profiler.disable()
-
-        stats = pstats.Stats(profiler)
-        stats.dump_stats("loop_profile.prof")
-
-        self.logger.info("Profiling data saved to loop_profile.prof")
+        # profiler.disable()
+        #
+        # stats = pstats.Stats(profiler)
+        # stats.dump_stats("loop_profile.prof")
+        #
+        # self.logger.info("Profiling data saved to loop_profile.prof")
 
         self.mws_series_data1 = mws_series_data1
         self.mws_series_data2 = mws_series_data2

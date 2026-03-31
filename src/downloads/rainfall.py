@@ -249,17 +249,65 @@ class Xarr(Downloader):
                 "crs": final_raster.rio.crs
             }
 
-        WOKRERS = 8
-        ASK_BUFF = 96
+        K = 24*3
+        def process_K(i, da, clipping_geom, target_res):
+            """
+            Worker function to process a single time slice.
+            """
+            # 1. Slice and prepare metadata
+            hourly_slice = da.isel(time=range(i, i+K))
+
+            # Ensure standard spatial names for rioxarray
+            hourly_slice.rio.write_crs("EPSG:4326", inplace=True)
+            hourly_slice.rio.write_transform(inplace=True)
+
+            # 2. Upscale/Reproject to 30m (Nearest Neighbor for 'copying' blocks)
+            hourly_slice_30m = hourly_slice.rio.reproject(
+                dst_crs="EPSG:4326",
+                resolution=target_res,
+                resampling=Resampling.bilinear
+            )
+
+            # 3. Clip to the specific watershed geometry
+            final_raster = hourly_slice_30m.rio.clip(
+                [clipping_geom],
+                crs="EPSG:4326",
+                drop=True,
+                all_touched=True
+            )
+
+            # Sum across the time dimension to produce a daily total
+            daily_sum = final_raster.sum(dim="time", skipna=True)
+
+            # Ensure appropriate dtype and shape
+            daily_sum = daily_sum.astype("float32").squeeze()
+
+            # Build a day-level timestamp (use the first hour of the block)
+            timestamp = hourly_slice.time[0].dt.strftime("%Y%m%d_%H").item()
+
+            return {
+                "timestamp": timestamp,
+                "data": daily_sum.values,
+                "bounds": daily_sum.rio.bounds(),
+                "transform": daily_sum.rio.transform(),
+                "crs": daily_sum.rio.crs
+            }
+
+        WOKRERS = 20
+        ASK_BUFF = 672//K
         N = len(da.time)
         # times = da.time.values
-        with concurrent.futures.ThreadPoolExecutor(max_workers=WOKRERS) as executor:
+        with (
+            concurrent.futures.ThreadPoolExecutor(max_workers=WOKRERS) as executor,
+            tqdm(range(N), desc="Exporting Rainfall") as pbar
+        ):
             futures = deque()
 
-            for t in tqdm(range(N), desc="Exporting Rainfall"):
+            while pbar.n < N:
                 if len(futures)==0:
                     gc.collect()
-                    it = range(t, min(t+ASK_BUFF, N))
+                    t = pbar.n
+                    it = range(t, min(t+ASK_BUFF*K, N))
                     da_slice = da.isel(time=it)
                     for i in it:
                         futures.append(
@@ -272,9 +320,19 @@ class Xarr(Downloader):
                             )
                         )
 
-                future = futures.popleft()  # O(1)
-                result = future.result()
-                yield result
+                res = futures.popleft().result()
+                res["data"] = cp.asarray(res["data"])
+                pbar.update(1)
+                for _ in range(K-1):
+                    if len(futures)==0:
+                        # happens when date difference is not fortnightly
+                        assert pbar.n == N
+                        break
+                    res2 = futures.popleft().result()
+                    res["data"] += cp.asarray(res2["data"])
+                    pbar.update(1)
+                res["data"] = res["data"].get()
+                yield res
 
 
 # class Geedim(Downloader):
