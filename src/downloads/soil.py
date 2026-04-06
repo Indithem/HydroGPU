@@ -32,7 +32,7 @@ class Downloader(GenericDownloader):
         region = self.load_region()
 
         # Load hydrologic soil group dataset
-        hsg_image = ee.Image('projects/sat-io/open-datasets/HiHydroSoilv2_0/Hydrologic_Soil_Group_250m')
+        hsg_image = ee.Image('projects/ee-dharmisha-siddharth/assets/HYSOGs250m')
 
         # Clip to your region and scale
         hsg_clip = hsg_image.clipToBoundsAndScale(

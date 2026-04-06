@@ -10,13 +10,12 @@ from downloads import rainfall
 
 class Runoff(GenericAlgorithm):
     def load_inputs(self):
-        self.rainfall_iter = rainfall.Xarr(self.args, self.logger, self.cfg)
+        self.rainfall_iter = rainfall.Xarr(self.args, self.logger, self.cfg, self.tif_handler)
 
     def main(self):
         # pathlib.Path(self.cfg.RUNOFFS_FOLDER).mkdir(parents=True, exist_ok=True)
 
         images = []
-        P_sum = None
         P5_sum = None
         previous_Runoff = None
         # runoff_rasters = []
@@ -39,7 +38,6 @@ class Runoff(GenericAlgorithm):
             images.append(img)
 
             if index == 4:
-                P_sum = cp.sum(cp.stack([cp.asarray(i) for i in images[2:5]]), axis=0)
                 P5_sum = cp.sum(cp.stack([cp.asarray(i) for i in images[:5]]), axis=0)
                 # self.logger.info(f"4. Initial sum creation")
             elif index >= 5:
@@ -50,7 +48,6 @@ class Runoff(GenericAlgorithm):
                 P5_sum = P5_sum - old_img + new_img
                 old_img = cp.asarray(images[-3])
                 # assert check_physical_range(old_img, "old_img (for P_sum)", min_val=0.0)
-                P_sum = P_sum - old_img + new_img
                 # self.logger.info(f"4. Updated sums")
                 del old_img, new_img
                 old_img = images.pop(0)
@@ -58,10 +55,12 @@ class Runoff(GenericAlgorithm):
                 # self.logger.info(f"5. Pop and delete oldest image")
 
             if index >= 4:
-                if previous_Runoff is not None:
-                    P_sum += previous_Runoff
-                    P5_sum += previous_Runoff
+                # if previous_Runoff is not None:
+                #     P_sum += previous_Runoff
+                #     P5_sum += previous_Runoff
                     # self.logger.info("6. Add previous runoff")
+
+                P_sum = cp.asarray(images[-1])
 
                 # check_numerical_stability(P_sum, "P_sum")
                 # check_numerical_stability(P5_sum, "P5_sum")

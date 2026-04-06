@@ -4,7 +4,7 @@ import requests
 
 class Downloader(GenericDownloader):
     def main(self):
-        dataset = ee.Image('CGIAR/SRTM90_V4')
+        dataset = ee.Image('USGS/SRTMGL1_003')
         elevation = dataset.select('elevation')
 
         # with open(self.cfg.BOUNDARY_GEOJSON_PATH) as f:
@@ -14,7 +14,13 @@ class Downloader(GenericDownloader):
 
         region = self.load_region()
 
-        elevation_clip = elevation.clipToBoundsAndScale(
+        # 1. Calculate slope in degrees
+        slope_deg = ee.Terrain.slope(elevation)
+
+        # 2. Convert to Gradient: tan(slope * pi / 180)
+        slope_gradient = slope_deg.multiply(3.141592).divide(180).tan()
+
+        elevation_clip = slope_gradient.clipToBoundsAndScale(
             geometry=region,
             scale=self.cfg.GEE_SCALE
         )

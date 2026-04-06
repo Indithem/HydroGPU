@@ -204,6 +204,42 @@ class Xarr(Downloader):
         deg_per_meter = 1 / 111319.49
         target_res_degrees = target_scale_meters * deg_per_meter
 
+        # 1. Calculate dimensions
+        y_size, x_size = da.y.size, da.x.size
+        total_pixels = y_size * x_size
+
+        # 2. Create the Index Map
+        # The 'sink_index' is the very last position (index = total_pixels)
+        source_indices = np.arange(total_pixels).reshape(y_size, x_size).astype(np.int32)
+
+        # 3. Prepare rioxarray with a specific nodata pointer
+        dummy_da = da.isel(time=0).copy(data=source_indices)
+        dummy_da.rio.write_crs("EPSG:4326", inplace=True)
+
+        # CRITICAL: Set nodata to the sink index
+        # This ensures clipped areas are filled with 'total_pixels'
+        dummy_da.rio.write_nodata(total_pixels, inplace=True)
+
+        # 4. Reproject and Clip
+        # Areas outside clipping_geom will now contain the value: total_pixels
+        mapped_indices_da = dummy_da.rio.reproject(
+            dst_crs="EPSG:4326",
+            resolution=target_res_degrees,
+            resampling=Resampling.nearest
+        ).rio.clip([clipping_geom], crs="EPSG:4326", drop=True, all_touched=True)
+
+        # 5. Transfer LUT to GPU
+        GPU_LUT = cp.asarray(mapped_indices_da.values)
+
+        # Move the LUT to GPU
+        # 4. Extract static metadata and move LUT to GPU
+        STATIC_METADATA = {
+            "bounds": mapped_indices_da.rio.bounds(),
+            "transform": mapped_indices_da.rio.transform(),
+            "crs": mapped_indices_da.rio.crs,
+            "shape": mapped_indices_da.shape
+        }
+
         # self.empty_folder(self.cfg.RAINFALL_FOLDER)
 
         self.logger.info("ready to download rainfall")
@@ -222,7 +258,7 @@ class Xarr(Downloader):
             hourly_slice_30m = hourly_slice.rio.reproject(
                 dst_crs="EPSG:4326",
                 resolution=target_res,
-                resampling=Resampling.bilinear
+                resampling=Resampling.nearest
             )
 
             # 3. Clip to the specific watershed geometry
@@ -249,7 +285,64 @@ class Xarr(Downloader):
                 "crs": final_raster.rio.crs
             }
 
-        K = 24*3
+        def process_hour_gpu(i, da, gpu_lut, static_meta):
+            """
+            Lightning fast reprojection using GPU Look-Up Table.
+            """
+            # 1. Get the raw CPU slice
+            # We use .values to avoid xarray overhead; ensure it matches the LUT shape
+            hourly_slice_cpu = da.isel(time=i).values
+
+            # 2. Transfer to GPU
+            gpu_src = cp.asarray(hourly_slice_cpu)
+
+            # 3. Apply LUT (Fancy Indexing)
+            # .ravel() treats the source as a 1D array so the LUT can pick indices directly
+            gpu_final = gpu_src.ravel()[gpu_lut]
+
+            # 4. Return results (Bringing data back to CPU for the dictionary)
+            return {
+                "timestamp": da.isel(time=i).time.dt.strftime('%Y%m%d_%H').item(),
+                "data": gpu_final,
+                "bounds": static_meta["bounds"],
+                "transform": static_meta["transform"],
+                "crs": static_meta["crs"]
+            }
+
+        def process_hour_gpu_sum(da, gpu_lut, static_meta):
+            """
+            Computes the sum of all reprojected slices entirely on GPU.
+            """
+            # Initialize the accumulator on the GPU with the shape of your LUT
+            # This matches the shape of the clipped watershed
+            gpu_sum = cp.zeros(gpu_lut.shape, dtype=cp.float32)
+
+            # Pre-fetch the data to minimize xarray overhead in the loop
+            # If the dataset fits in RAM, da.values is faster than repeated .isel()
+            raw_data = da.values
+
+            for i in range(raw_data.shape[0]):
+                gpu_src_flat = cp.concatenate([
+                    cp.asarray(raw_data[i]).ravel(),
+                    cp.array([0], dtype=raw_data[i].dtype)
+                ])
+
+                # 2. Apply LUT and add to total (In-place)
+                # We use .ravel() to treat the source as 1D for the index lookup
+                gpu_sum += gpu_src_flat[gpu_lut]
+
+            # self.tif_loader.save_tiff(gpu_sum.get(),
+            #     f"{self.cfg.RAINFALL_FOLDER}/rainfall_{da.time[0].dt.strftime('%Y%m%d_%H').item()}.tif)")
+
+            return {
+                "timestamp": da.isel(time=0).time.dt.strftime('%Y%m%d_%H').item(),
+                "data": gpu_sum.get(),  # Bring back to CPU for output
+                "bounds": static_meta["bounds"],
+                "transform": static_meta["transform"],
+                "crs": static_meta["crs"]
+            }
+
+        K = 24
         def process_K(i, da, clipping_geom, target_res):
             """
             Worker function to process a single time slice.
@@ -294,7 +387,7 @@ class Xarr(Downloader):
             }
 
         WOKRERS = 20
-        ASK_BUFF = 672//K
+        ASK_BUFF = 16
         N = len(da.time)
         # times = da.time.values
         with (
@@ -307,32 +400,56 @@ class Xarr(Downloader):
                 if len(futures)==0:
                     gc.collect()
                     t = pbar.n
-                    it = range(t, min(t+ASK_BUFF*K, N))
-                    da_slice = da.isel(time=it)
-                    for i in it:
+                    # da_big_slice = da.isel(time=range(t, min(t+ASK_BUFF*K, N)))
+                    for i in range(ASK_BUFF):
+                        if t+i*K >= N:
+                            break
+                        # start_local = i * K
+                        # end_local = min((i + 1) * K, da_big_slice.time.size)
+                        # it = slice(start_local, end_local)
+                        # da_slice = da_big_slice.isel(time=it)
+
+                        da_slice = da.isel(time=slice(t+i*K, min(t+(i+1)*K, N)))
+
                         futures.append(
                             executor.submit(
-                                process_hour,
-                                i-t,
+                                process_hour_gpu_sum,
                                 da_slice,
-                                clipping_geom,
-                                target_res_degrees,
+                                GPU_LUT,
+                                STATIC_METADATA,
                             )
                         )
 
+                    # it = range(t, min(t+ASK_BUFF*K, N))
+                    # da_slice = da.isel(time=it)
+                    # for i in it:
+                    #     futures.append(
+                    #         executor.submit(
+                    #             process_hour,
+                    #             i-t,
+                    #             da_slice,
+                    #             clipping_geom,
+                    #             target_res_degrees,
+                    #         )
+                    #     )
+
                 res = futures.popleft().result()
-                res["data"] = cp.asarray(res["data"])
-                pbar.update(1)
-                for _ in range(K-1):
-                    if len(futures)==0:
-                        # happens when date difference is not fortnightly
-                        assert pbar.n == N
-                        break
-                    res2 = futures.popleft().result()
-                    res["data"] += cp.asarray(res2["data"])
-                    pbar.update(1)
-                res["data"] = res["data"].get()
+                pbar.update(K)
                 yield res
+
+                # res = futures.popleft().result()
+                # res["data"] = cp.asarray(res["data"])
+                # pbar.update(1)
+                # for _ in range(K-1):
+                #     if len(futures)==0:
+                #         # happens when date difference is not fortnightly
+                #         assert pbar.n == N
+                #         break
+                #     res2 = futures.popleft().result()
+                #     res["data"] += cp.asarray(res2["data"])
+                #     pbar.update(1)
+                # res["data"] = res["data"].get()
+                # yield res
 
 
 # class Geedim(Downloader):

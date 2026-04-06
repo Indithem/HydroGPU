@@ -8,6 +8,7 @@ import geopandas as gpd
 import config as cfg
 from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive
+from utils import GeoTIFFHandler
 
 ee.Initialize(project=cfg.GEE_PROJECT_NAME)
 
@@ -25,10 +26,11 @@ class GenericDownloader:
         drive: GoogleDrive = None
     _init_structs = None
 
-    def __init__(self, args, logger: Logger, config=cfg):
+    def __init__(self, args, logger: Logger, config=cfg, tif_loader:GeoTIFFHandler = None):
         self.cfg = config
         self.args = args
         self.logger = logger
+        self.tif_loader = tif_loader
 
         if GenericDownloader._init_structs is None:
             GenericDownloader._init_structs = GenericDownloader.InitializationData()

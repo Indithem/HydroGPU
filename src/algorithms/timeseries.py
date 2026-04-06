@@ -59,6 +59,14 @@ class TimeSeries(GenericAlgorithm):
             add_to_series(mws_series_data1, s1, name)
             if s2 is not None:
                 add_to_series(mws_series_data2, s2, name)
+
+                # self.logger.info("Saving tifs")
+                # self.tif_handler.save_tiff(s1, "rainfall.tif")
+                # self.tif_handler.save_tiff(s2.get(), "runoff.tif")
+                # self.tif_handler.save_tiff(mws_cp.get(), "mws.tif")
+                #
+                # return
+
         # profiler.disable()
         #
         # stats = pstats.Stats(profiler)
