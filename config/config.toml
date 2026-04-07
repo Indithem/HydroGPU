@@ -33,7 +33,7 @@ MICROWATERSHEDS_PATH = './tifs/mws.geojson'
 
 # Folder where rainfall data from GEE is downloaded to
 RAINFALL_FOLDER = './tifs/rainfall/'
-RUNOFFS_FOLDER = './tifs/runoffs/'
+RUNOFFS_FOLDER = './tifs/runoffs2/'
 
 TIMESERIES_VECTOR = './tifs/timeseries.geojson'
 

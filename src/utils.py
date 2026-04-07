@@ -9,6 +9,8 @@ import cupy as cp
 import numpy as np
 from tqdm import tqdm
 from typing import Any, List
+import xarray as xr
+import rioxarray
 
 def load_tif_image(file_path) -> nptypes.NDArray[Any]:
     """Load a .tif image efficiently and return a NumPy array (float32)."""
@@ -131,6 +133,60 @@ class GeoTIFFHandler:
                 dst.write(new_data, 1)  # Write new data to band 1
 
             self.logger.info(f"Saved new TIFF to {output_path}")
+
+    def save_geozarr(self, new_data: np.ndarray, output_path: str, name:str="data"):
+        if new_data.shape != (self.height, self.width):
+            raise ValueError(f"Data shape {new_data.shape} does not match shape ({self.height}, {self.width})")
+
+        # 1. Generate coordinates from transform (Top-Left + half-pixel offset)
+        x_coords = self.transform.c + (np.arange(self.width) + 0.5) * self.transform.a
+        y_coords = self.transform.f + (np.arange(self.height) + 0.5) * self.transform.e
+
+        # 2. Wrap in Xarray
+        da = xr.DataArray(
+            new_data,
+            dims=("y", "x"),
+            coords={
+                "y": y_coords,
+                "x": x_coords
+            },
+            name=name
+        )
+
+        # 3. Attach CRS (Essential for GIS)
+        da.rio.write_crs(self.crs, inplace=True)
+
+        # 4. Save to Zarr (Creates a directory at output_path)
+        da.to_dataset().to_zarr(output_path, mode="w", zarr_format=2)
+
+    def save_geozarr_time(self, new_data: np.ndarray, time, output_path: str, name:str="data"):
+        if new_data.shape != (self.height, self.width):
+            raise ValueError(f"Data shape {new_data.shape} does not match shape ({self.height}, {self.width})")
+
+        # 1. Generate coordinates from transform (Top-Left + half-pixel offset)
+        x_coords = self.transform.c + (np.arange(self.width) + 0.5) * self.transform.a
+        y_coords = self.transform.f + (np.arange(self.height) + 0.5) * self.transform.e
+
+        # 2. Wrap in Xarray
+        da = xr.DataArray(
+            [new_data],
+            dims=("time", "y", "x"),
+            coords={
+                "time": [time],
+                "y": y_coords,
+                "x": x_coords
+            },
+            name=name
+        )
+
+        # 3. Attach CRS (Essential for GIS)
+        da.rio.write_crs(self.crs, inplace=True)
+
+        # 4. Save to Zarr (Creates a directory at output_path)
+        if not os.path.exists(output_path):
+            da.to_dataset().to_zarr(output_path, mode="w", zarr_format=2)
+        else:
+            da.to_dataset().to_zarr(output_path, mode="a", zarr_format=2, append_dim="time")
 
     def save_multiband_tiff(self, output_path:str, data_arrays: list[nptypes.NDArray[Any]], compression="LZW"):
         """

@@ -23,9 +23,9 @@ def modify_cfg(args):
 
 def prereq():
     downloaders = [
+        lulc,
         dem,
         soil,
-        lulc,
     ]
     downloaders = [d.Downloader for d in downloaders]
 

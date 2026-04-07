@@ -1,6 +1,7 @@
 import gc
 import json
 import os
+import pathlib
 import shutil
 import time
 from argparse import ArgumentParser
@@ -200,6 +201,8 @@ class Xarr(Downloader):
         da = ds['hourlyPrecipRate'].rename({'lat': 'y', 'lon': 'x'})
         da = da.transpose("time", "y", "x")
 
+        # Convert GEE resolution (30m) to decimal degrees for EPSG:4326
+        # 111,319.49m is the approximate length of 1 degree at the equator
         target_scale_meters = self.cfg.GEE_SCALE  # 30
         deg_per_meter = 1 / 111319.49
         target_res_degrees = target_scale_meters * deg_per_meter
@@ -212,8 +215,12 @@ class Xarr(Downloader):
         # The 'sink_index' is the very last position (index = total_pixels)
         source_indices = np.arange(total_pixels).reshape(y_size, x_size).astype(np.int32)
 
+        self.dummy_da = da.isel(time=0)
+        pathlib.Path(self.cfg.RAINFALL_FOLDER).mkdir(parents=True, exist_ok=True)
+
+
         # 3. Prepare rioxarray with a specific nodata pointer
-        dummy_da = da.isel(time=0).copy(data=source_indices)
+        dummy_da = self.dummy_da.copy(data=source_indices)
         dummy_da.rio.write_crs("EPSG:4326", inplace=True)
 
         # CRITICAL: Set nodata to the sink index
@@ -237,7 +244,8 @@ class Xarr(Downloader):
             "bounds": mapped_indices_da.rio.bounds(),
             "transform": mapped_indices_da.rio.transform(),
             "crs": mapped_indices_da.rio.crs,
-            "shape": mapped_indices_da.shape
+            "shape": mapped_indices_da.shape,
+            "original_size": total_pixels
         }
 
         # self.empty_folder(self.cfg.RAINFALL_FOLDER)
@@ -313,30 +321,37 @@ class Xarr(Downloader):
             """
             Computes the sum of all reprojected slices entirely on GPU.
             """
-            # Initialize the accumulator on the GPU with the shape of your LUT
-            # This matches the shape of the clipped watershed
-            gpu_sum = cp.zeros(gpu_lut.shape, dtype=cp.float32)
-
             # Pre-fetch the data to minimize xarray overhead in the loop
             # If the dataset fits in RAM, da.values is faster than repeated .isel()
             raw_data = da.values
+            gpu_sum = cp.zeros(static_meta['original_size'], dtype=cp.float32)
 
             for i in range(raw_data.shape[0]):
-                gpu_src_flat = cp.concatenate([
-                    cp.asarray(raw_data[i]).ravel(),
-                    cp.array([0], dtype=raw_data[i].dtype)
-                ])
+                # gpu_src_flat = cp.concatenate([
+                #     cp.asarray(raw_data[i]).ravel(),
+                #     cp.array([0], dtype=raw_data[i].dtype)  # at the last index(=total_pixels) LUT looks up this value
+                # ])
 
                 # 2. Apply LUT and add to total (In-place)
                 # We use .ravel() to treat the source as 1D for the index lookup
-                gpu_sum += gpu_src_flat[gpu_lut]
+                # gpu_sum += gpu_src_flat[gpu_lut]
+                gpu_sum += cp.asarray(raw_data[i]).ravel()
+
+            time_stamp = da.isel(time=0).time.dt.strftime('%Y%m%d_%H').item()
+            self.save_geozarr(gpu_sum, time_stamp)
+
+            projected = cp.concatenate([
+                gpu_sum,
+                cp.array([0], dtype=raw_data[0].dtype)  # at the last index(=total_pixels) LUT looks up this value
+            ])
+            projected = projected[gpu_lut]
 
             # self.tif_loader.save_tiff(gpu_sum.get(),
             #     f"{self.cfg.RAINFALL_FOLDER}/rainfall_{da.time[0].dt.strftime('%Y%m%d_%H').item()}.tif)")
 
             return {
-                "timestamp": da.isel(time=0).time.dt.strftime('%Y%m%d_%H').item(),
-                "data": gpu_sum.get(),  # Bring back to CPU for output
+                "timestamp": time_stamp,
+                "data": projected.get(),  # Bring back to CPU for output
                 "bounds": static_meta["bounds"],
                 "transform": static_meta["transform"],
                 "crs": static_meta["crs"]
@@ -450,6 +465,20 @@ class Xarr(Downloader):
                 #     pbar.update(1)
                 # res["data"] = res["data"].get()
                 # yield res
+
+    def save_geozarr(self, summed_rainfall_data, timestamp):
+        # Accessing by name (Recommended)
+        height = self.dummy_da.sizes['y']
+        width = self.dummy_da.sizes['x']
+
+        # Reshape on GPU, then bring to CPU
+        unflattened_data = summed_rainfall_data.reshape(height, width).get()
+
+        # Now create the DataArray
+        data = self.dummy_da.copy(data=unflattened_data)
+        # data.rio.write_crs("EPSG:4326", inplace=True)
+
+        data.to_dataset().to_zarr(f"{self.cfg.RAINFALL_FOLDER}/rainfall_{timestamp}.zarr", mode="w", zarr_format=2)
 
 
 # class Geedim(Downloader):

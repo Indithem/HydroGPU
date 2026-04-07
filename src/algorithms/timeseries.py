@@ -1,4 +1,6 @@
 import json
+import os
+import pathlib
 from datetime import datetime
 from pprint import pprint
 from shapely.geometry import shape
@@ -53,12 +55,24 @@ class TimeSeries(GenericAlgorithm):
             for val, mws_id in zip(avg, ids):
                 running_data[int(mws_id)].append((val, dt.isoformat()))
 
+        # pathlib.Path(self.cfg.RAINFALL_FOLDER).mkdir(parents=True, exist_ok=True)
+        pathlib.Path(self.cfg.RUNOFFS_FOLDER).mkdir(parents=True, exist_ok=True)
+
         # profiler = cProfile.Profile()
         # profiler.enable()
         for s1, s2, name in self.algo.main():
             add_to_series(mws_series_data1, s1, name)
+            # self.tif_handler.save_geozarr(s1, f"{self.cfg.RAINFALL_FOLDER}/{name}.zarr")
             if s2 is not None:
                 add_to_series(mws_series_data2, s2, name)
+                # self.tif_handler.save_geozarr_time(s2.get(),
+                #         name,
+                # self.cfg.RUNOFFS_FOLDER,
+                # "runoff",
+                # )
+                # self.tif_handler.save_geozarr(s2.get(),
+                #                               f"{self.cfg.RUNOFFS_FOLDER}/{name}.zarr",
+                #                               "runoff")
 
                 # self.logger.info("Saving tifs")
                 # self.tif_handler.save_tiff(s1, "rainfall.tif")
