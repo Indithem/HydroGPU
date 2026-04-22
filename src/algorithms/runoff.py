@@ -7,6 +7,7 @@ from . import GenericAlgorithm, GeoTIFFHandler
 import cupy as cp
 import numpy as np
 from downloads import rainfall
+import config as cfg
 
 class Runoff(GenericAlgorithm):
     """
@@ -16,15 +17,15 @@ class Runoff(GenericAlgorithm):
         self.rainfall_iter = rainfall.Load_from_database()
 
     def main(self):
-        # pathlib.Path(self.cfg.RUNOFFS_FOLDER).mkdir(parents=True, exist_ok=True)
+        # pathlib.Path(cfg.RUNOFFS_FOLDER).mkdir(parents=True, exist_ok=True)
 
         images = []
         P5_sum = None
         previous_Runoff = None
         sr1, sr2, sr3 = self.compute_sr_and_CNs(
-            cp.asarray(self.tif_handler.load_with_padding(self.cfg.SOIL_PATH)),
-            cp.asarray(self.tif_handler.load_with_padding(self.cfg.LULC_PATH)),
-            cp.asarray(self.tif_handler.load_with_padding(self.cfg.DEMFILE_PATH))
+            cp.asarray(self.tif_handler.load_with_padding(cfg.SOIL_PATH)),
+            cp.asarray(self.tif_handler.load_with_padding(cfg.LULC_PATH)),
+            cp.asarray(self.tif_handler.load_with_padding(cfg.DEMFILE_PATH))
         )
 
         self.logger.info("Loaded sr's")
@@ -94,10 +95,10 @@ class Runoff(GenericAlgorithm):
 
                 # self.logger.info("9. Transfer flow")
 
-                # self.tif_handler.save_tiff(cp.asnumpy(R), os.path.join(self.cfg.RUNOFFS_FOLDER, f'runoff_simulation_{index}.tif'))
+                # self.tif_handler.save_tiff(cp.asnumpy(R), os.path.join(cfg.RUNOFFS_FOLDER, f'runoff_simulation_{index}.tif'))
                 # self.logger.info("10. write runoff simulation result")
                 # runoff_rasters.append(R.get())
-                # self.tif_handler.save_geozarr_time(R.get(), file['timestamp'], self.cfg.RUNOFFS_FOLDER, "runoff")
+                self.tif_handler.save_geozarr_time(R.get(), file['timestamp'], cfg.RUNOFFS_FOLDER, "runoff")
                 yield (img, R, file['timestamp'])
 
             else:

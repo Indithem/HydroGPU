@@ -7,13 +7,12 @@ from shapely.geometry import shape
 from tqdm import tqdm
 import cProfile
 import pstats
-from downloads import mws
 from algorithms.runoff import Runoff
 from . import GenericAlgorithm, GeoTIFFHandler
 from typing import Type, Dict, Tuple, DefaultDict
 from collections import defaultdict, OrderedDict
 import cupy as cp
-
+import config as cfg
 
 # Not generic enough yet...
 class TimeSeries(GenericAlgorithm):
@@ -30,9 +29,9 @@ class TimeSeries(GenericAlgorithm):
 
     def load_inputs(self):
         self.algo.load_inputs()
-        # self.mws = self.tif_handler.rasterize_by_id(self.cfg.MICROWATERSHEDS_PATH)
-        # self.mws_geojson = mws.Clip(self.args, self.logger, self.cfg).main()
-        with open(self.cfg.MICROWATERSHEDS_PATH, 'r') as f:
+        # self.mws = self.tif_handler.rasterize_by_id(cfg.MICROWATERSHEDS_PATH)
+        # self.mws_geojson = mws.Clip(self.args, self.logger, cfg).main()
+        with open(cfg.MICROWATERSHEDS_PATH, 'r') as f:
             self.mws_geojson = json.load(f)
 
         shapes = [
@@ -88,10 +87,10 @@ class TimeSeries(GenericAlgorithm):
             id = int(mws['properties']['id'])
             mws['properties']["timeseries"] = make_output(id)
 
-        with open(self.cfg.TIMESERIES_VECTOR, 'w+') as f:
+        with open(cfg.TIMESERIES_VECTOR, 'w+') as f:
             json.dump(mws_data, f)
 
-        self.logger.info(f"Saved file to {self.cfg.TIMESERIES_VECTOR}")
+        self.logger.info(f"Saved file to {cfg.TIMESERIES_VECTOR}")
 
 
 

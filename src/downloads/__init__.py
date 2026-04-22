@@ -29,7 +29,6 @@ class GenericDownloader:
     _init_structs = None
 
     def __init__(self):
-        self.cfg = cfg
         self.logger = utils.tif_handler.logger
         self.tif_loader = utils.tif_handler
 
@@ -57,7 +56,7 @@ class GenericDownloader:
 
     def load_region(self):
         # Load the file - GeoPandas handles FeatureCollection vs Feature automatically
-        gdf = gpd.read_file(self.cfg.BOUNDARY_GEOJSON_PATH)
+        gdf = gpd.read_file(cfg.BOUNDARY_GEOJSON_PATH)
 
         # Generalize to a single geometry (Unions everything if there are multiple features)
         # Helpful if the input itself is a vector of different mws.

@@ -7,7 +7,6 @@ from utils import GeoTIFFHandler
 
 class GenericAlgorithm:
     def __init__(self) -> None:
-        self.cfg = cfg
         tif_handler = utils.tif_handler
         self.tif_handler = tif_handler
         self.logger = tif_handler.logger

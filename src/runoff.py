@@ -2,7 +2,7 @@ import shutil
 from argparse import ArgumentParser
 from pathlib import Path
 import ee
-from downloads import dem, lulc, soil, mws
+from downloads import dem, lulc, soil
 from algorithms import timeseries
 from downloads import rainfall
 import config as cfg
@@ -27,8 +27,8 @@ def modify_cfg(args):
 
 def prereq():
     downloaders = [
-        # lulc.Downloader,
-        # soil.Downloader,
+        lulc.Downloader,
+        soil.Downloader,
         rainfall.Download_to_database
     ]
 
@@ -53,7 +53,7 @@ if __name__=="__main__":
     if args.pre_req:
         shutil.rmtree(cfg.RUNOFFS_FOLDER, ignore_errors=True)
         shutil.rmtree(cfg.RAINFALL_FOLDER, ignore_errors=True)
-        # dem.Downloader().main()
+        dem.Downloader().main()
         utils.tif_handler = GeoTIFFHandler(cfg.DEMFILE_PATH, logger)
         prereq()
     else:
