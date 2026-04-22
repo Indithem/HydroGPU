@@ -21,7 +21,7 @@ We need DEM file as input for this project. These files are fetched from GEE
 *but may have to be downloaded interactively, in case of errors*.
 
 ```sh
-uv run src/runoff_only_with_rainfall_prereqs.py
+uv run src/runoff_prereqs_only.py
 ```
 Save it somewhere, probably as `tifs/dem.tiff`, using config from previous step.
 
@@ -31,7 +31,7 @@ rasters are pointed by config.
 # Usage
 Run from the root folder, the folder where this README.md is located, the following:
 ```sh
-uv run src/runoff_only_with_rainfall.py
+uv run src/runoff.py
 ```
 
 ```

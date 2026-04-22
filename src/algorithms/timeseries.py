@@ -17,14 +17,14 @@ import cupy as cp
 
 # Not generic enough yet...
 class TimeSeries(GenericAlgorithm):
-    def __init__(self, args, tif_handler: GeoTIFFHandler,
+    def __init__(self,
                  algo: Type[GenericAlgorithm] = Runoff,
                  series_1="Rainfall",
                  series_2="Runoff",
                  *oth_args, **kwargs
                  ) -> None:
-        super().__init__(args, tif_handler, *oth_args, **kwargs)
-        self.algo = algo(args, tif_handler)
+        super().__init__(*oth_args, **kwargs)
+        self.algo = algo()
         self.series_1 = series_1
         self.series_2 = series_2
 
@@ -48,38 +48,17 @@ class TimeSeries(GenericAlgorithm):
 
         def add_to_series(running_data, raster, name):
             avg, ids = per_watershed_avg(mws_cp, raster)
-            # name is of form "rainfall_20230701_00.tif"
-            # raw_date = name[9:-4]
             raw_date = name
             dt = datetime.strptime(raw_date, "%Y%m%d_%H")
             for val, mws_id in zip(avg, ids):
                 running_data[int(mws_id)].append((val, dt.isoformat()))
 
-        # pathlib.Path(self.cfg.RAINFALL_FOLDER).mkdir(parents=True, exist_ok=True)
-        pathlib.Path(self.cfg.RUNOFFS_FOLDER).mkdir(parents=True, exist_ok=True)
-
         # profiler = cProfile.Profile()
         # profiler.enable()
         for s1, s2, name in self.algo.main():
             add_to_series(mws_series_data1, s1, name)
-            # self.tif_handler.save_geozarr(s1, f"{self.cfg.RAINFALL_FOLDER}/{name}.zarr")
             if s2 is not None:
                 add_to_series(mws_series_data2, s2, name)
-                # self.tif_handler.save_geozarr_time(s2.get(),
-                #         name,
-                # self.cfg.RUNOFFS_FOLDER,
-                # "runoff",
-                # )
-                # self.tif_handler.save_geozarr(s2.get(),
-                #                               f"{self.cfg.RUNOFFS_FOLDER}/{name}.zarr",
-                #                               "runoff")
-
-                # self.logger.info("Saving tifs")
-                # self.tif_handler.save_tiff(s1, "rainfall.tif")
-                # self.tif_handler.save_tiff(s2.get(), "runoff.tif")
-                # self.tif_handler.save_tiff(mws_cp.get(), "mws.tif")
-                #
-                # return
 
         # profiler.disable()
         #

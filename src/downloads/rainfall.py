@@ -7,9 +7,13 @@ import time
 from argparse import ArgumentParser
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
+
 import xarray as xr
 import requests
 import concurrent.futures
+
+import zarr
 from rasterio.enums import Resampling
 from shapely.geometry import shape
 from rasterio.transform import from_origin
@@ -17,149 +21,84 @@ from tqdm import tqdm
 # import geedim as gd
 import cupy as cp
 import numpy as np
+import pandas as pd
 import cucim.skimage.transform as cimg
 
 from downloads import GenericDownloader, ee, Logger
 
-class Downloader(GenericDownloader):
-    added_args = False
+class DownloaderBase(GenericDownloader):
+    def __init__(self):
 
-    def main(self):
-        # with open(self.cfg.BOUNDARY_GEOJSON_PATH) as f:
-        #     geojson = json.load(f)
-        #     region = ee.Geometry.Polygon(geojson['geometry']['coordinates'])
+        super().__init__()
+        self.zarr_lock = Lock()
+        self.zarr_path = os.path.join(self.cfg.RAINFALL_FOLDER, "rainfall_archive.zarr")
 
-        region = self.load_region()
-        rainfall_collection = (
-            ee.ImageCollection('JAXA/GPM_L3/GSMaP/v6/operational')
-            .filterBounds(region)
-            .filterDate(self.args.start, self.args.end)
-            .select('hourlyPrecipRate')
+    def save_geozarr(self, flat_data, timestamp, dummy_da):
+        """
+        Saves data as a 3D (Time, Y, X) chunked array with full spatial coordinates.
+        """
+
+        # 1. Reshape flat data to native grid dimensions
+        # Using the shape from self.dummy_da (e.g., [Lat, Lon])
+        native_y, native_x = dummy_da.y.size, dummy_da.x.size
+        raster_data = flat_data.reshape(native_y, native_x)
+
+        # 2. Create the DataArray with proper spatial coords
+        da = xr.DataArray(
+            raster_data[np.newaxis, ...],  # Shape: (1, Y, X)
+            dims=("time", "y", "x"),
+            coords={
+                "time": [pd.to_datetime(timestamp, format='%Y%m%d_%H')],
+                "y": dummy_da.y.values,
+                "x": dummy_da.x.values
+            },
+            name="precipitation"
         )
 
-        self.logger.info(f'Total Images in Collection: {rainfall_collection.size().getInfo()}')
+        # 3. Add CRS and metadata
+        da.rio.write_crs(dummy_da.rio.crs, inplace=True)
+        da.rio.write_transform(dummy_da.rio.transform(), inplace=True)
 
-        images = rainfall_collection.toList(rainfall_collection.size())
-        n = images.size().getInfo()
+        ds = da.to_dataset()
 
-        tasks: list[ee.batch.Task] = []
+        # To ensure no race conditions during writes to zarr, a lock is used
+        # We can potentially increase performance here
+        # you can initialize an empty Zarr store and have threads write to specific "regions" without appending
+        with self.zarr_lock:
+            if not os.path.exists(self.zarr_path):
+                encoding = {
+                    "precipitation": {"chunks": (1, native_y, native_x)},
+                    "time": {
+                        "units": "hours since 2017-07-01 00:00:00",
+                        "calendar": "proleptic_gregorian",
+                        "dtype": "int64"  # Ensuring integer storage for hours
+                    }
+                }
+                ds.to_zarr(self.zarr_path, mode='w', encoding=encoding, zarr_format=2)
+            else:
+                ds.to_zarr(self.zarr_path, mode='a', append_dim='time', zarr_format=2)
 
-        folder_name = self.cfg.GOOGLEDRIVE_RAINFALL_FOLDER
-        query = f"title = '{folder_name}' and mimeType = 'application/vnd.google-apps.folder' and trashed=false"
+    def load_geozarr(self):
+        """
+        Loads the Zarr archive as a standard Xarray Dataset.
+        """
 
-        if not self.args.skip_gee:
-            for folder in self.drive.ListFile({'q': query}).GetList():
-                self.drive.CreateFile({'id': folder['id']}).Trash()
+        if not os.path.exists(self.zarr_path):
+            self.logger.error(f"Zarr not found at {self.zarr_path}")
+            return None
 
-            for i in tqdm(range(n)):
-                img = ee.Image(images.get(i))
-                date = ee.Date(img.get('system:time_start')).format('YYYYMMdd_HH')
-                filename_pref = 'rainfall_' + date.getInfo()
-                task = ee.batch.Export.image.toDrive(
-                    image=img.clip(region),
-                    description='rainfall_' + date.getInfo(),
-                    folder=self.cfg.GOOGLEDRIVE_RAINFALL_FOLDER,
-                    fileNamePrefix=filename_pref,
-                    region=region,
-                    scale=self.cfg.GEE_SCALE,  # GSMaP native ~10 km
-                    # crs='EPSG:4326',
-                    # maxPixels=1e13
-                )
-                task.start()
-                tasks += [task]
+        # chunks={} opens it lazily using Dask
+        ds = xr.open_zarr(self.zarr_path, consolidated=True, chunks={})
+        return ds
+    
 
-            for task in tqdm(tasks):
-                while task.active():
-                    time.sleep(30)
 
-        self.empty_folder(self.cfg.RAINFALL_FOLDER)
-
-        folders = self.drive.ListFile({'q': query}).GetList()
-
-        assert len(folders) == 1
-
-        folder_id = folders[0]['id']
-        query = f"'{folder_id}' in parents and trashed=false"
-        files_in_folder = self.drive.ListFile({'q': query}).GetList()
-        file_ids = [f['id'] for f in files_in_folder]
-
-        with ThreadPoolExecutor() as executor:
-            list(executor.map(self.download_gdrive_file, file_ids, [self.cfg.RAINFALL_FOLDER]*len(file_ids)))
-
-    def parse_args(parser: ArgumentParser):
-        if not Downloader.added_args:
-            parser.add_argument('--start', help="in YYYY-MM-DD format (inclusive)", default='2023-07-01', type=ee.Date)
-            parser.add_argument('--end', help="in YYYY-MM-DD format (exclusive)", default='2023-07-03', type=ee.Date)
-            parser.add_argument('--skip-gee', help="assume rasters are already fetched to Google Drive", default=False,
-                                action='store_true')
-            Downloader.added_args = True
-
-class Downloader2(Downloader):
+class Xarr(DownloaderBase):
     """
-    afaik, Bypasses google drive and directly downloads to folder
-
-    Doesn't work if file size >50MB
+    Ignore this class. This used to help when "streaming" rainfall data.
+    Currently, in one instance we download data and then in another we calculate runoff data.
     """
-    def main(self):
-        region = self.load_region()
-        rainfall_collection = (
-            ee.ImageCollection('JAXA/GPM_L3/GSMaP/v6/operational')
-            .filterBounds(region)
-            .filterDate(self.args.start, self.args.end)
-            .select('hourlyPrecipRate')
-        )
 
-        # FIX: Map properties to a Feature properly
-        features = rainfall_collection.map(lambda img: ee.Feature(None, {
-            'id': img.id(),
-            'date': img.date().format('YYYYMMdd_HH')
-        }))
-
-        # 2. FIX: Get the actual list of property dictionaries
-        # We use .list() on the collection then getInfo to bring the data to Python
-        img_infos = [f['properties'] for f in features.getInfo()['features']]
-
-        self.logger.info(f"Sample Feature: {features.first().getInfo()}")
-        self.logger.info(f'Total Images in Collection: {rainfall_collection.size().getInfo()}')
-        self.logger.info(f'Total Images to process: {len(img_infos)}')
-
-        def download_worker(info):
-            # info is {'date': '20230702_22', 'id': '20230702_2200'}
-            leaf_id = info['id']
-            date_str = info['date']
-            filename = f"rainfall_{date_str}.tif"
-
-            # FIX: Prepend the parent collection path
-            parent_path = 'JAXA/GPM_L3/GSMaP/v6/operational'
-            full_asset_id = f"{parent_path}/{leaf_id}"
-
-            try:
-                # Now GEE will find the asset in the public catalog
-                img = ee.Image(full_asset_id).clip(region)
-
-                url = img.getDownloadURL({
-                    'scale': 30,
-                    'region': region,
-                    'format': 'GEO_TIFF',
-                    'crs': 'EPSG:4326'
-                })
-
-                res = requests.get(url)
-                if res.status_code == 200:
-                    path = f"{self.cfg.RAINFALL_FOLDER}/{filename}"
-                    with open(path, 'wb') as f:
-                        f.write(res.content)
-                    return True
-            except Exception as e:
-                self.logger.error(f"Error downloading {filename}: {e}")
-                return False
-
-        # FIX 2: Use ThreadPoolExecutor for parallel downloads
-        # This saturates your bandwidth and bypasses the slow Drive export queue
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-            list(tqdm(executor.map(download_worker, img_infos), total=len(img_infos)))
-
-class Xarr(Downloader):
     def main(self):
         self.logger.info("Starting rainfall download")
 
@@ -175,7 +114,7 @@ class Xarr(Downloader):
         rainfall_collection = (
             ee.ImageCollection('JAXA/GPM_L3/GSMaP/v6/operational')
             # .filterBounds(region)
-            .filterDate(self.args.start, self.args.end)
+            .filterDate(self.cfg.ARG_START_DATE, self.cfg.ARG_END_DATE)
             .select('hourlyPrecipRate')
         )
 
@@ -466,54 +405,185 @@ class Xarr(Downloader):
                 # res["data"] = res["data"].get()
                 # yield res
 
-    def save_geozarr(self, summed_rainfall_data, timestamp):
-        # Accessing by name (Recommended)
-        height = self.dummy_da.sizes['y']
-        width = self.dummy_da.sizes['x']
+class Download_to_database(DownloaderBase):
+    def main(self):
+        self.ingest_rainfall_to_zarr()
 
-        # Reshape on GPU, then bring to CPU
-        unflattened_data = summed_rainfall_data.reshape(height, width).get()
+    def ingest_rainfall_to_zarr(self):
+        """
+        Part 1: Purely fetches data, sums it on GPU, and saves to GeoZarr.
+        """
+        self.logger.info("Starting rainfall ingestion to GeoZarr")
+        region = self.load_region()
+        buffered_region = region.buffer(12000).bounds()
 
-        # Now create the DataArray
-        data = self.dummy_da.copy(data=unflattened_data)
-        # data.rio.write_crs("EPSG:4326", inplace=True)
+        rainfall_collection = (
+            ee.ImageCollection('JAXA/GPM_L3/GSMaP/v6/operational')
+            .filterDate(self.cfg.ARG_START_DATE, self.cfg.ARG_END_DATE)
+            .select('hourlyPrecipRate')
+        )
 
-        data.to_dataset().to_zarr(f"{self.cfg.RAINFALL_FOLDER}/rainfall_{timestamp}.zarr", mode="w", zarr_format=2)
+        first_img = rainfall_collection.first()
+        native_proj = first_img.projection()
+
+        ds = xr.open_dataset(
+            rainfall_collection,
+            engine='ee',
+            projection=native_proj,
+            geometry=buffered_region,
+            fast_time_slicing=True,
+        )
+
+        da = ds['hourlyPrecipRate'].rename({'lat': 'y', 'lon': 'x'}).transpose("time", "y", "x")
+        total_pixels = da.y.size * da.x.size
+        dummy_da = da.isel(time=0)
+
+        N = len(da.time)
+        K = 24  # Hours per day
+
+        ASK_BUFF = 50
+        WORKERS = 20
+
+        def process_slice(t):
+            da_slice = da.isel(time=slice(t, min(t + K, N)))
+
+            # Extract raw data and sum on GPU
+            raw_data = da_slice.values
+            gpu_sum = cp.zeros(total_pixels, dtype=cp.float32)
+
+            for i in range(raw_data.shape[0]):
+                gpu_sum += cp.asarray(raw_data[i]).ravel()
+
+            timestamp = da_slice.time[0].dt.strftime('%Y%m%d_%H').item()
+
+            # Save the flat sum to the database
+            # Assuming self.save_geozarr handles time-indexing inside the Zarr
+            self.save_geozarr(gpu_sum.get(), timestamp, dummy_da)
+
+        with (
+            concurrent.futures.ThreadPoolExecutor(max_workers=WORKERS) as executor,
+            tqdm(range(N), desc="Downloading Rainfall") as pbar
+        ):
+            futures = []
+
+            while pbar.n < pbar.total:
+                if len(futures) == 0:
+                    gc.collect()
+                    t = pbar.n
+                    for i in range(ASK_BUFF):
+                        if (t+i*K) >= N:
+                            break
+                        futures.append(executor.submit(
+                            process_slice,
+                            t+i*K
+                        ))
+                futures.pop().result()
+                pbar.update(K)
+
+        zarr.consolidate_metadata(self.zarr_path)
+        self.logger.info("Ingestion complete.")
 
 
-# class Geedim(Downloader):
-#     def main(self):
-#         self.logger.info("Starting rainfall download")
-#
-#         # 1. Convert dict/GeoJSON to EE Geometry
-#         region = self.load_region()
-#
-#         # 2. Add the buffer (12km is safe for 11km pixels)
-#         # This ensures you don't get "cut off" edges
-#         buffered_region = region.buffer(12000).bounds()
-#
-#         clipping_geom = shape(region.getInfo())
-#
-#         rainfall_collection = (
-#             ee.ImageCollection('JAXA/GPM_L3/GSMaP/v6/operational')
-#             # .filterBounds(region)
-#             .filterDate(self.args.start, self.args.end)
-#             .select('hourlyPrecipRate')
-#         )
-#
-#         first_img = rainfall_collection.first()
-#         native_proj = first_img.projection()
-#
-#         gd.Initialize(
-#             project=self.cfg.GEE_PROJECT_NAME,
-#             opt_url='https://earthengine-highvolume.googleapis.com'
-#         )
-#
-#         prep_coll = rainfall_collection.gd.prepareForExport(
-#             region=buffered_region,
-#             scale=0.1,
-#             crs=native_proj.crs().getInfo(),
-#             dtype='float32'  # Match GSMaP data type
-#         )
-#
-#         prep_coll.gd.toGeoTIFF('download_folder', split='images')
+class Load_from_database(DownloaderBase):
+
+    def __init__(self):
+        super().__init__()
+
+
+        region = self.load_region()
+        buffered_region = region.buffer(12000).bounds()
+
+        clipping_geom = shape(region.getInfo())
+
+        rainfall_collection = (
+            ee.ImageCollection('JAXA/GPM_L3/GSMaP/v6/operational')
+            .filterDate(self.cfg.ARG_START_DATE, self.cfg.ARG_END_DATE)
+            .select('hourlyPrecipRate')
+        )
+
+        first_img = rainfall_collection.first()
+        native_proj = first_img.projection()
+        ds = xr.open_dataset(
+            rainfall_collection,
+            engine='ee',
+            # chunks={'time': 48},
+            projection=native_proj,  # <--- CRITICAL: Matches original GEE alignment
+            geometry=buffered_region,  # <--- Ensures the extent covers your region
+            # scale=0.1             # Remove this; projection already contains the 0.1 scale
+            fast_time_slicing=True,
+        )
+
+        # Prepare the whole DataArray once
+        da = ds['hourlyPrecipRate'].rename({'lat': 'y', 'lon': 'x'})
+        da = da.transpose("time", "y", "x")
+
+        # Convert GEE resolution (30m) to decimal degrees for EPSG:4326
+        # 111,319.49m is the approximate length of 1 degree at the equator
+        target_scale_meters = self.cfg.GEE_SCALE  # 30
+        deg_per_meter = 1 / 111319.49
+        target_res_degrees = target_scale_meters * deg_per_meter
+
+        # 1. Calculate dimensions
+        y_size, x_size = da.y.size, da.x.size
+        total_pixels = y_size * x_size
+
+        # 2. Create the Index Map
+        # The 'sink_index' is the very last position (index = total_pixels)
+        source_indices = np.arange(total_pixels).reshape(y_size, x_size).astype(np.int32)
+
+        self.dummy_da = da.isel(time=0)
+        dummy_da = self.dummy_da.copy(data=source_indices)
+        dummy_da.rio.write_crs("EPSG:4326", inplace=True)
+
+        # CRITICAL: Set nodata to the sink index
+        # This ensures clipped areas are filled with 'total_pixels'
+        dummy_da.rio.write_nodata(total_pixels, inplace=True)
+
+        # 4. Reproject and Clip
+        # Areas outside clipping_geom will now contain the value: total_pixels
+        mapped_indices_da = dummy_da.rio.reproject(
+            dst_crs="EPSG:4326",
+            resolution=target_res_degrees,
+            resampling=Resampling.nearest
+        ).rio.clip([clipping_geom], crs="EPSG:4326", drop=True, all_touched=True)
+
+        # 5. Transfer LUT to GPU
+        self.GPU_LUT = cp.asarray(mapped_indices_da.values)
+
+        # Move the LUT to GPU
+        # 4. Extract static metadata and move LUT to GPU
+        self.STATIC_METADATA = {
+            "bounds": mapped_indices_da.rio.bounds(),
+            "transform": mapped_indices_da.rio.transform(),
+            "crs": mapped_indices_da.rio.crs,
+            "shape": mapped_indices_da.shape,
+            "original_size": total_pixels
+        }
+
+    def main(self):
+        self.logger.info("Starting rainfall ingestion to GeoZarr")
+
+        yield from self.stream_reprojected_rainfall()
+
+    def stream_reprojected_rainfall(self):
+        ds = self.load_geozarr()
+        
+        for i in tqdm(range(len(ds.time))):
+            # Extract 2D slice and flatten for the GPU LUT
+            hourly_slice = ds.precipitation.isel(time=i)
+            flat_cpu = hourly_slice.values.ravel() 
+            
+            # Move to GPU
+            gpu_src = cp.asarray(flat_cpu)
+            
+            # Append sink pixel for nodata and apply LUT
+            projected_buffer = cp.concatenate([gpu_src, cp.array([0], dtype=gpu_src.dtype)])
+            gpu_final = projected_buffer[self.GPU_LUT]
+
+            yield {
+                "timestamp": hourly_slice.time.dt.strftime('%Y%m%d_%H').item(),
+                "data": gpu_final.get(),
+                "bounds": self.STATIC_METADATA["bounds"],
+                "transform": self.STATIC_METADATA["transform"],
+                "crs": self.STATIC_METADATA["crs"]
+            }

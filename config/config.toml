@@ -15,6 +15,7 @@ GEE_SCALE = 30 # in meters
 # How I obtained this geojson can be studied from that dir's justfile
 # )
 # BOUNDARY_GEOJSON_PATH = './tifs/boundary_polygons/masalia_boundary.geojson'
+# Currently, this can be provided with command line arguments.
 BOUNDARY_GEOJSON_PATH = './tifs/mws.geojson'
 
 
@@ -32,11 +33,12 @@ FLOWACCUMULATION_PATH = './tifs/facc.tif'
 MICROWATERSHEDS_PATH = './tifs/mws.geojson'
 
 # Folder where rainfall data from GEE is downloaded to
-RAINFALL_FOLDER = './tifs/rainfall/'
-RUNOFFS_FOLDER = './tifs/runoffs2/'
+RAINFALL_FOLDER = './tifs/rainfall3/'
+RUNOFFS_FOLDER = './tifs/runoffs3/'
 
 TIMESERIES_VECTOR = './tifs/timeseries.geojson'
 
 PAN_INDIA_MWS = './tifs/raw/Microwatershed_v2_with_details.geojson'
 
-
+ARG_START_DATE = '2017-07-01'
+ARG_END_DATE = '2025-06-18'

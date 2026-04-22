@@ -1,8 +1,22 @@
+"""
+Currently, this calculates Slope (gradient) on GEE Servers.
+DEM is not downloaded.
+"""
+
+
 from downloads import GenericDownloader, ee
 import json
 import requests
+import config
 
 class Downloader(GenericDownloader):
+    def __init__(self):
+        """
+        Override parent class's init. As GeoTiff handler needs one tif file for CRS reference
+        We download DEM as this reference
+        """
+        self.cfg = config
+
     def main(self):
         dataset = ee.Image('USGS/SRTMGL1_003')
         elevation = dataset.select('elevation')
@@ -29,7 +43,7 @@ class Downloader(GenericDownloader):
             'format': 'GEO_TIFF'
         })
 
-        self.logger.info('Download URL:' + url)
+        # self.logger.info('Download URL:' + url)
 
         response = requests.get(url)
 

@@ -1,3 +1,8 @@
+"""
+This algorithm is currently not used.
+"""
+
+
 from . import GenericAlgorithm
 import cupy as cp
 

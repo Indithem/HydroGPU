@@ -3,8 +3,9 @@ from argparse import ArgumentParser
 from downloads import GenericDownloader, ee
 import json
 import requests
-from downloads.rainfall import Downloader as RainfallDownloader
 
+# I used to do something like below, before I found out how soil is loaded in core-stack-backend
+# I'm keeping these here just as reference.
 # '''
 # Function definition to combine L1, L2, and L3 outputs of a given region
 # '''

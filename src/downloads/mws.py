@@ -1,3 +1,11 @@
+"""
+This file is not used.
+This algorithm is not tested also.
+
+Its intention was to extract RoI's mws from Microwatershed_v2_with_details.geojson
+That geojson can be found from CoRE Stac. It is the pan india mws geojson.
+"""
+
 from downloads import GenericDownloader, ee
 import json
 import geopandas as gpd

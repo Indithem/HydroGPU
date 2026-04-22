@@ -308,3 +308,6 @@ class GeoTIFFHandler:
         )
 
         return mask
+
+
+tif_handler: GeoTIFFHandler = None

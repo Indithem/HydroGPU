@@ -1,5 +1,5 @@
 - [ ] Clip mws raster using AoI and a global raster.
-- [ ] Google earth engine doesn't properly clip.
+- [x] Google earth engine doesn't properly clip.
 - [ ] Migrate stream order from legacy code.
 - [ ] Jump Martix.
 

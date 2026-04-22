@@ -3,9 +3,12 @@ from argparse import ArgumentParser
 from downloads import GenericDownloader, ee
 import json
 import requests
-from downloads.rainfall import Downloader as RainfallDownloader
+from downloads.rainfall import DownloaderBase as RainfallDownloader
 
 class DynamicWorld(GenericDownloader):
+    """
+    Currently, the LULC is mode of lulc's found in past 2 months from end date. Static
+    """
     def main(self):
         # with open(self.cfg.BOUNDARY_GEOJSON_PATH) as f:
         #     geojson = json.load(f)
@@ -14,8 +17,12 @@ class DynamicWorld(GenericDownloader):
 
         region = self.load_region()
 
-        start = self.args.end.advance(-2, 'month')
-        end = self.args.end
+        end_date = ee.Date(self.cfg.ARG_END_DATE)
+        start_date = ee.Date(self.cfg.ARG_START_DATE)
+
+        # start = end_date.advance(-2, 'month')
+        start = start_date
+        end = end_date
 
         # --- Dynamic World ---
         dw_col = (ee.ImageCollection('GOOGLE/DYNAMICWORLD/V1')
@@ -44,9 +51,7 @@ class DynamicWorld(GenericDownloader):
         with open(self.cfg.LULC_PATH, 'wb') as f:
             f.write(response.content)
 
-    def parse_args(parser: ArgumentParser):
-        return RainfallDownloader.parse_args(parser)
-
+# I had teseted different sources. For now, lulc is taken from DynamicWorldv1
 Downloader = DynamicWorld
 
 class Corestack(GenericDownloader):

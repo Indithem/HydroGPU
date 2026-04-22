@@ -1,14 +1,19 @@
+"""
+This algorithm is currently not used.
+"""
+
+
 from . import GenericAlgorithm, GeoTIFFHandler
 import cupy as cp
 import numpy as np
 
 class Microwatersheds(GenericAlgorithm):
-    def __init__(self, args, tif_handler: GeoTIFFHandler, threshold=1000) -> None:
+    def __init__(self,threshold=1000) -> None:
         """
             adjust threshold as needed. masalia required smaller(10) threshold but lgb higher(10,000 etc)
         """
-        super().__init__(args, tif_handler)
-        tif_handler.logger.info(f"Using threshold {threshold}")
+        super().__init__()
+        self.logger.info(f"Using threshold {threshold}")
         self.STREAM_THRESHOLD = threshold
 
     def load_inputs(self):
