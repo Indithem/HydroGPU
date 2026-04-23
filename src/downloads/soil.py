@@ -15,9 +15,4 @@ class Downloader(GenericDownloader):
             scale=cfg.GEE_SCALE
         )
 
-        geemap.download_ee_image(
-            hsg_clip,
-            filename=cfg.SOIL_PATH,
-            scale=cfg.GEE_SCALE,  # Adjust scale as needed
-            region=region,
-        )
+        self.save_from_gee(hsg_clip, region, cfg.SOIL_PATH)

@@ -33,9 +33,4 @@ class Downloader(GenericDownloader):
             scale=cfg.GEE_SCALE
         )
 
-        geemap.download_ee_image(
-            elevation_clip,
-            filename=cfg.DEMFILE_PATH,
-            scale=cfg.GEE_SCALE,  # Adjust scale as needed
-            region=region,
-        )
+        self.save_from_gee(elevation_clip, region, cfg.DEMFILE_PATH)

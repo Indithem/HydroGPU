@@ -12,9 +12,6 @@ import utils
 parser = ArgumentParser()
 logger = make_logger("runoff_only_with_rainfall.log")
 
-
-# I wanted to override cfg. This could easily be done by directly modifying cfg.X=Y
-# But I wasn't sure if this is part of python's standard. So, I'm overwriting with a new cfg.
 def modify_cfg(args):
     cfg.BOUNDARY_GEOJSON_PATH = args.boundary
     cfg.MICROWATERSHEDS_PATH = args.boundary
@@ -51,7 +48,6 @@ if __name__=="__main__":
     modify_cfg(args)
 
     if args.pre_req:
-        shutil.rmtree(cfg.RUNOFFS_FOLDER, ignore_errors=True)
         shutil.rmtree(cfg.RAINFALL_FOLDER, ignore_errors=True)
         dem.Downloader().main()
         utils.tif_handler = GeoTIFFHandler(cfg.DEMFILE_PATH, logger)
@@ -59,5 +55,6 @@ if __name__=="__main__":
     else:
         utils.tif_handler = GeoTIFFHandler(cfg.DEMFILE_PATH, logger)
 
+    shutil.rmtree(cfg.RUNOFFS_FOLDER, ignore_errors=True)
     timeseries.TimeSeries().run()
     logger.info("Done")

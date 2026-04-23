@@ -4,7 +4,10 @@ from logging import Logger
 from argparse import ArgumentParser
 from dataclasses import dataclass
 import ee
+import geemap
 import geopandas as gpd
+import requests
+
 import config as cfg
 from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive
@@ -67,6 +70,37 @@ class GenericDownloader:
         geojson_struct = combined_geom.__geo_interface__
         region = ee.Geometry(geojson_struct)
         return region
+
+    @staticmethod
+    def save_from_gee(collection, region, tif_file_path):
+        # try:
+            # 1. Attempt the fast direct download
+            url = collection.getDownloadURL({
+                'format': 'GEO_TIFF',
+                'scale': cfg.GEE_SCALE,
+                'region': region
+            })
+
+            response = requests.get(url)
+
+            # If Earth Engine says "Too Large", the status_code will not be 200
+            if response.status_code == 200:
+                with open(tif_file_path, 'wb') as f:
+                    f.write(response.content)
+
+                print(f"Downloaded {tif_file_path} with `getDownloadURL`")
+            else:
+                raise ValueError(f"Image too large for direct URL (Status {response.status_code})")
+
+        # except Exception as e:
+        #
+        #     # 2. Fallback to geemap (handles tiling/stitching automatically)
+        #     geemap.download_ee_image(
+        #         collection,
+        #         filename=tif_file_path,
+        #         scale=cfg.GEE_SCALE,
+        #         region=region
+        #     )
 
     def main(self):
         pass

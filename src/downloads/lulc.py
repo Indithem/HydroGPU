@@ -29,9 +29,5 @@ class Downloader(GenericDownloader):
             scale=cfg.GEE_SCALE
         )
 
-        geemap.download_ee_image(
-            dw_clip,
-            filename=cfg.LULC_PATH,
-            scale=cfg.GEE_SCALE,  # Adjust scale as needed
-            region=region,
-        )
+        self.save_from_gee(dw_clip, region, cfg.LULC_PATH)
+

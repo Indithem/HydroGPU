@@ -3,8 +3,9 @@ Produces runoff and rainfall timeseries over region for each microwatershed
 in a region of interest.
 
 ## Inputs
-- Geojson polygon boundary of region of interest. (an example is provided in `tifs/region.geojson`)
-- Geojson vector file of Microwatershed Boundary.
+- Geojson vector file of Microwatershed Boundary which is 
+also the polygon boundary of region of interest. 
+(an example is provided in `tifs/delhi.geojson`)
 - Time period of interest, as start date and end date.
 
 # Usage - First time initialization
@@ -16,18 +17,6 @@ uv run src/authenticate.py
 ## Check configuration values
 Check if the configuration values in `config/config.toml` are set correctly.
 
-## One time inputs downloads
-We need DEM file as input for this project. These files are fetched from GEE 
-*but may have to be downloaded interactively, in case of errors*.
-
-```sh
-uv run src/runoff_prereqs_only.py
-```
-Save it somewhere, probably as `tifs/dem.tiff`, using config from previous step.
-
-If you want to test with other rasters you can skip this step, but ensure your
-rasters are pointed by config.
-
 # Usage
 Run from the root folder, the folder where this README.md is located, the following:
 ```sh
@@ -35,13 +24,16 @@ uv run src/runoff.py
 ```
 
 ```
-usage: runoff_only_with_rainfall.py [-h] [--start START] [--end END] [--skip-gee]
+usage: runoff.py [-h] [-p] [-b BOUNDARY] [-t] [--start START] [--end END]
 
 options:
-  -h, --help     show this help message and exit
-  --start START  in YYYY-MM-DD format (inclusive)
-  --end END      in YYYY-MM-DD format (exclusive)
-  --skip-gee     assume rasters are already fetched to Google Drive
+  -h, --help            show this help message and exit
+  -p, --pre-req         also do pre-req stuff
+  -b, --boundary BOUNDARY
+                        use another boundary file
+  -t                    Dump timeseries next to boundary file
+  --start START         in YYYY-MM-DD format (inclusive)
+  --end END             in YYYY-MM-DD format (exclusive)
 ```
 
 # Dependencies

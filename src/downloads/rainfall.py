@@ -3,6 +3,7 @@ import json
 import os
 import pathlib
 import shutil
+import threading
 import time
 from argparse import ArgumentParser
 from collections import deque
@@ -30,10 +31,11 @@ class DownloaderBase(GenericDownloader):
     def __init__(self):
 
         super().__init__()
-        self.zarr_lock = Lock()
+        self.zarr_cv = threading.Condition()
+        self.zarr_ticket = 0
         self.zarr_path = os.path.join(cfg.RAINFALL_FOLDER, "rainfall_archive.zarr")
 
-    def save_geozarr(self, flat_data, timestamp, dummy_da):
+    def save_geozarr(self, flat_data, timestamp, dummy_da, t):
         """
         Saves data as a 3D (Time, Y, X) chunked array with full spatial coordinates.
         """
@@ -64,19 +66,25 @@ class DownloaderBase(GenericDownloader):
         # To ensure no race conditions during writes to zarr, a lock is used
         # We can potentially increase performance here
         # you can initialize an empty Zarr store and have threads write to specific "regions" without appending
-        with self.zarr_lock:
-            if not os.path.exists(self.zarr_path):
-                encoding = {
-                    "precipitation": {"chunks": (1, native_y, native_x)},
-                    "time": {
-                        "units": "hours since 2017-07-01 00:00:00",
-                        "calendar": "proleptic_gregorian",
-                        "dtype": "int64"  # Ensuring integer storage for hours
-                    }
+        with self.zarr_cv:
+            self.zarr_cv.wait_for(lambda: self.zarr_ticket == t)
+
+        if not os.path.exists(self.zarr_path):
+            encoding = {
+                "precipitation": {"chunks": (1, native_y, native_x)},
+                "time": {
+                    "units": "hours since 2017-07-01 00:00:00",
+                    "calendar": "proleptic_gregorian",
+                    "dtype": "int64"  # Ensuring integer storage for hours
                 }
-                ds.to_zarr(self.zarr_path, mode='w', encoding=encoding, zarr_format=2)
-            else:
-                ds.to_zarr(self.zarr_path, mode='a', append_dim='time', zarr_format=2)
+            }
+            ds.to_zarr(self.zarr_path, mode='w', encoding=encoding, zarr_format=2)
+        else:
+            ds.to_zarr(self.zarr_path, mode='a', append_dim='time', zarr_format=2)
+
+        with self.zarr_cv:
+            self.zarr_ticket += 1
+            self.zarr_cv.notify_all()
 
     def load_geozarr(self):
         """
@@ -109,6 +117,40 @@ class Download_to_database(DownloaderBase):
             .select('hourlyPrecipRate')
         )
 
+        # rainfall_collection = (
+        #     ee.ImageCollection("NASA/GPM_L3/IMERG_DAILY_V06")
+        #     .filterDate(cfg.ARG_START_DATE, cfg.ARG_END_DATE)
+        #     .select('total_accum')
+        # )
+        #
+        # # 1. Define the time range
+        # start_date = ee.Date(cfg.ARG_START_DATE)
+        # end_date = ee.Date(cfg.ARG_END_DATE)
+        #
+        # # 2. Calculate the number of days between start and end
+        # n_days = end_date.difference(start_date, 'days')
+        #
+        # def sum_daily(day_offset):
+        #     # Calculate the start and end of each 24-hour window
+        #     start = start_date.advance(ee.Number(day_offset), 'days')
+        #     end = start.advance(1, 'days')
+        #
+        #     # Filter the collection for this specific day and sum
+        #     daily_sum = (rainfall_collection
+        #                  .filterDate(start, end)
+        #                  .sum())  # Sums the 'hourlyPrecipRate'
+        #
+        #     # Return the image with its date metadata (important for further filtering)
+        #     return daily_sum.set({
+        #         'system:time_start': start.millis(),
+        #         'date_string': start.format('YYYY-MM-DD')
+        #     })
+        #
+        # # 3. Create a sequence of days and map the function
+        # daily_collection = ee.ImageCollection(
+        #     ee.List.sequence(0, n_days.subtract(1)).map(sum_daily)
+        # )
+
         first_img = rainfall_collection.first()
         native_proj = first_img.projection()
 
@@ -130,7 +172,7 @@ class Download_to_database(DownloaderBase):
         ASK_BUFF = 50
         WORKERS = 20
 
-        def process_slice(t):
+        def process_slice(t, ticket_num):
             da_slice = da.isel(time=slice(t, min(t + K, N)))
 
             # Extract raw data and sum on GPU
@@ -144,13 +186,14 @@ class Download_to_database(DownloaderBase):
 
             # Save the flat sum to the database
             # Assuming self.save_geozarr handles time-indexing inside the Zarr
-            self.save_geozarr(gpu_sum.get(), timestamp, dummy_da)
+            self.save_geozarr(gpu_sum, timestamp, dummy_da, ticket_num)
 
         with (
             concurrent.futures.ThreadPoolExecutor(max_workers=WORKERS) as executor,
             tqdm(range(N), desc="Downloading Rainfall") as pbar
         ):
             futures = []
+            ticket_num = 0
 
             while pbar.n < pbar.total:
                 if len(futures) == 0:
@@ -161,8 +204,10 @@ class Download_to_database(DownloaderBase):
                             break
                         futures.append(executor.submit(
                             process_slice,
-                            t+i*K
+                            t+i*K,
+                            ticket_num
                         ))
+                        ticket_num += 1
                 futures.pop().result()
                 pbar.update(K)
 
