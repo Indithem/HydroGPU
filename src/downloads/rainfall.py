@@ -31,9 +31,44 @@ class DownloaderBase(GenericDownloader):
     def __init__(self):
 
         super().__init__()
-        self.zarr_cv = threading.Condition()
-        self.zarr_ticket = 0
         self.zarr_path = os.path.join(cfg.RAINFALL_FOLDER, "rainfall_archive.zarr")
+
+    def init_zarr(self, dates, dummy_da):
+        """
+        Initializes a Zarr store with the full time extent to allow parallel region writes.
+        """
+        native_y, native_x = dummy_da.y.size, dummy_da.x.size
+
+        # Create the skeleton Dataset
+        # We use empty/zeros but with compute=False, so no data is actually written yet
+        ds_skeleton = xr.Dataset(
+            {"precipitation": (["time", "y", "x"],
+                               np.zeros((len(dates), native_y, native_x), dtype='float32'))},
+            coords={
+                "time": dates,
+                "y": dummy_da.y.values,
+                "x": dummy_da.x.values
+            }
+        )
+
+        # Metadata/CRS (Important for GeoZarr)
+        ds_skeleton.rio.write_crs(dummy_da.rio.crs, inplace=True)
+        ds_skeleton.rio.write_transform(dummy_da.rio.transform(), inplace=True)
+
+        # Encoding: chunking by 1 day is standard for daily time-series
+        encoding = {
+            "precipitation": {"chunks": (1, native_y, native_x)},
+            "time": {
+                "units": "hours since 2017-07-01 00:00:00",
+                "calendar": "proleptic_gregorian",
+                "dtype": "int64"  # Ensuring integer storage for hours
+            }
+        }
+
+        # Write ONLY metadata
+        ds_skeleton.to_zarr(self.zarr_path, mode='w', encoding=encoding, compute=False,  zarr_format=2)
+        self.logger.info(f"Initialized Zarr skeleton at {self.zarr_path} with {len(dates)} slots.")
+
 
     def save_geozarr(self, flat_data, timestamp, dummy_da, t):
         """
@@ -61,30 +96,9 @@ class DownloaderBase(GenericDownloader):
         da.rio.write_crs(dummy_da.rio.crs, inplace=True)
         da.rio.write_transform(dummy_da.rio.transform(), inplace=True)
 
-        ds = da.to_dataset()
+        ds = da.to_dataset().drop_vars(["y", "x", "spatial_ref"])
 
-        # To ensure no race conditions during writes to zarr, a lock is used
-        # We can potentially increase performance here
-        # you can initialize an empty Zarr store and have threads write to specific "regions" without appending
-        with self.zarr_cv:
-            self.zarr_cv.wait_for(lambda: self.zarr_ticket == t)
-
-        if not os.path.exists(self.zarr_path):
-            encoding = {
-                "precipitation": {"chunks": (1, native_y, native_x)},
-                "time": {
-                    "units": "hours since 2017-07-01 00:00:00",
-                    "calendar": "proleptic_gregorian",
-                    "dtype": "int64"  # Ensuring integer storage for hours
-                }
-            }
-            ds.to_zarr(self.zarr_path, mode='w', encoding=encoding, zarr_format=2)
-        else:
-            ds.to_zarr(self.zarr_path, mode='a', append_dim='time', zarr_format=2)
-
-        with self.zarr_cv:
-            self.zarr_ticket += 1
-            self.zarr_cv.notify_all()
+        ds.to_zarr(self.zarr_path, region={"time": slice(t, t + 1)})
 
     def load_geozarr(self):
         """
@@ -169,6 +183,9 @@ class Download_to_database(DownloaderBase):
         N = len(da.time)
         K = 24  # Hours per day
 
+        dates = pd.date_range(start=cfg.ARG_START_DATE, end=cfg.ARG_END_DATE, freq='D')
+        self.init_zarr(dates, dummy_da)
+
         ASK_BUFF = 50
         WORKERS = 20
 
@@ -186,34 +203,34 @@ class Download_to_database(DownloaderBase):
 
             # Save the flat sum to the database
             # Assuming self.save_geozarr handles time-indexing inside the Zarr
-            self.save_geozarr(gpu_sum, timestamp, dummy_da, ticket_num)
+            self.save_geozarr(gpu_sum.get(), timestamp, dummy_da, ticket_num)
 
         with (
             concurrent.futures.ThreadPoolExecutor(max_workers=WORKERS) as executor,
             tqdm(range(N), desc="Downloading Rainfall") as pbar
         ):
             futures = []
-            ticket_num = 0
 
             while pbar.n < pbar.total:
                 if len(futures) == 0:
                     gc.collect()
                     t = pbar.n
+                    assert t % K == 0
                     for i in range(ASK_BUFF):
-                        if (t+i*K) >= N:
+                        current_hour = t+i*K
+                        day_index = current_hour // K
+                        if current_hour >= N:
                             break
                         futures.append(executor.submit(
                             process_slice,
-                            t+i*K,
-                            ticket_num
+                            current_hour,
+                            day_index
                         ))
-                        ticket_num += 1
                 futures.pop().result()
                 pbar.update(K)
 
         zarr.consolidate_metadata(self.zarr_path)
         self.logger.info("Ingestion complete.")
-
 
 class Load_from_database(DownloaderBase):
 
